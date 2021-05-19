@@ -1,6 +1,8 @@
 (** A library of operators over relations,
     to define transition sequences and their properties. *)
 
+From Coq Require Import ssreflect.
+
 Set Implicit Arguments.
 
 Section SEQUENCES.
@@ -21,13 +23,15 @@ Inductive star: A -> A -> Prop :=
 Lemma star_one:
   forall (a b: A), R a b -> star a b.
 Proof.
-  eauto using star.
+move=>???.
+by apply/star_step/star_refl.
 Qed.
 
 Lemma star_trans:
   forall (a b: A), star a b -> forall c, star b c -> star a c.
 Proof.
-  induction 1; eauto using star. 
+move=>a b; elim=>// ????? IH ??.
+by apply/star_step/IH.
 Qed.
 
 (** One or several transitions: transitive closure of [R]. *)
@@ -39,32 +43,41 @@ Inductive plus: A -> A -> Prop :=
 Lemma plus_one:
   forall a b, R a b -> plus a b.
 Proof.
-  eauto using star, plus. 
+move=>???.
+by apply/plus_left/star_refl.
 Qed.
 
 Lemma plus_star:
   forall a b,
   plus a b -> star a b.
 Proof.
-  intros. inversion H. eauto using star.  
+move=>??; case.
+by exact: star_step.
 Qed.
 
 Lemma plus_star_trans:
   forall a b c, plus a b -> star b c -> plus a c.
 Proof.
-  intros. inversion H. eauto using plus, star_trans.
+move=>???; case=>???? H1 H2.
+by apply/plus_left/star_trans/H2/H1.
 Qed.
 
 Lemma star_plus_trans:
   forall a b c, star a b -> plus b c -> plus a c.
 Proof.
-  intros. inversion H0. inversion H; eauto using plus, star, star_trans.
+move=>???; case=>// ? b c HR HS.
+case: {-1}_ {-2}_ / HS (eq_refl b) (eq_refl c).
+- move=>? EQ1 _ H; rewrite {}EQ1 in HR.
+  by apply/plus_left/plus_star/H.
+- move=>???? HS1 EQ1 _ H; rewrite EQ1 in HR.
+  by apply/(plus_left HR)/star_trans/plus_star/H/star_step/HS1.
 Qed.
 
 Lemma plus_right:
   forall a b c, star a b -> R b c -> plus a c.
 Proof.
-  eauto using star_plus_trans, plus_one.
+move=>???? H2.
+by apply/star_plus_trans/plus_one/H2.
 Qed.
 
 (** Absence of transitions from a state. *)
@@ -82,15 +95,18 @@ Inductive starN: nat -> A -> A -> Prop :=
 Lemma starN_star:
   forall n a b, starN n a b -> star a b.
 Proof.
-  induction 1; econstructor; eauto.
+move=>n ??; elim.
+- by move=>?; exact: star_refl.
+- by move=>?????? H2; apply/star_step/H2.
 Qed.
 
 Lemma star_starN:
   forall a b, star a b -> exists n, starN n a b.
 Proof.
-  induction 1.
-- exists O; constructor.
-- destruct IHstar as (n & Sn). exists (S n); econstructor; eauto.
+move=>??; elim.
+- by move=>?; exists 0; exact: starN_refl.
+- move=>????? [n HS].
+  by exists (S n); apply/starN_step/HS.
 Qed.
 
 (** ** Infinite transition sequences *)
@@ -108,17 +124,17 @@ Definition all_seq_inf (a: A) : Prop :=
   leaving open the possibility that there exists finite sequences
   starting from [a].
 
-  Example: consider [A = nat] and [R] such that [R 0 0] and [R 0 1].  
+  Example: consider [A = nat] and [R] such that [R 0 0] and [R 0 1].
   [all_seq_inf 0] does not hold, because a sequence [0 -->* 1] cannot
   be extended.  Yet, [R] admits an infinite sequence, namely
   [0 --> 0 --> ...].
 
-  Another attempt would be to represent the sequence of states 
-  [a0 --> a1 --> a2 --> ... -> aN -> ...] explicitly, as a function 
+  Another attempt would be to represent the sequence of states
+  [a0 --> a1 --> a2 --> ... -> aN -> ...] explicitly, as a function
   [f: nat -> A] such that [f i] is the [i]-th state [ai] of the sequence. *)
 
 Definition infseq_with_function (a: A) : Prop :=
-  exists f: nat -> A, f 0 = a /\ forall i, R (f i) (f (1 + i)).
+  exists f: nat -> A, f 0 = a /\ forall i, R (f i) (f (S i)).
 
 (** This is a correct characterization of the existence of an infinite
   sequence of reductions.  However, it is inconvenient to work with
@@ -144,23 +160,23 @@ Definition infseq (a: A) : Prop :=
 Remark cycle_infseq:
   forall a, R a a -> infseq a.
 Proof.
-  intros. exists (fun b => b = a); split.
-  auto.
-  intros. subst a1. exists a; auto.
+move=>a H.
+exists (fun b => b = a); split=>// ? ->.
+by exists a.
 Qed.
 
-(** Mon generally: if all sequences from [a] are infinite, there exists one
+(** More generally: if all sequences from [a] are infinite, there exists one
   infinite sequence starting in [a]. *)
 
 Lemma infseq_if_all_seq_inf:
   forall a, all_seq_inf a -> infseq a.
 Proof.
-  intros a0 ALL0. 
-  exists all_seq_inf; split; auto.
-  intros a1 ALL1. destruct (ALL1 a1) as [a2 R12]. constructor. 
-  exists a2; split; auto.
-  intros a3 S23. destruct (ALL1 a3) as [a4 R23]. apply star_step with a2; auto.
-  exists a4; auto.
+move=>??.
+exists all_seq_inf; split=>// a1 HA1.
+move: (HA1 a1 (star_refl _))=>[a2 R12].
+exists a2; split=>// a3 S23.
+move: (HA1 a3 (star_step R12 S23))=>[a4 R23].
+by exists a4.
 Qed.
 
 (** Likewise, the characterization [infseq_with_function] based on functions
@@ -169,10 +185,13 @@ Qed.
 Lemma infseq_from_function:
   forall a, infseq_with_function a -> infseq a.
 Proof.
-  intros a0 (f & F0 & Fn). exists (fun a => exists i, f i = a); split.
-- exists 0; auto.
-- intros a1 (i1 & F1). subst a1. exists (f (1 + i1)); split; auto. exists (1 + i1); auto.
-Qed.  
+move=>? [f [??]].
+exists (fun a => exists i, f i = a); split.
+- by exists 0.
+- move=>a1 [i <-].
+  exists (f (S i)); split=>//.
+  by exists (S i).
+Qed.
 
 (** An "inversion lemma" for [infseq]: if [infseq a], i.e. there exists
   an infinite sequence starting in [a], then [a] can transition to a state [b]
@@ -181,8 +200,10 @@ Qed.
 Lemma infseq_inv:
   forall a, infseq a -> exists b, R a b /\ infseq b.
 Proof.
-  intros a (X & Xa & XP). destruct (XP a Xa) as (b & Rab & Xb). 
-  exists b; split; auto. exists X; auto.
+move=>a [X [Xa XP]].
+move: (XP a Xa)=>[b [??]].
+exists b; split=>//.
+by exists X.
 Qed.
 
 (** A very useful coinduction principle considers a set [X] where for
@@ -194,13 +215,21 @@ Lemma infseq_coinduction_principle:
   (forall a, X a -> exists b, plus a b /\ X b) ->
   forall a, X a -> infseq a.
 Proof.
-  intros X H a0 Xa0. 
-  exists (fun a => exists b, star a b /\ X b); split.
-- exists a0; auto using star_refl.
-- intros a1 (a2 & S12 & X2). inversion S12; subst.
-  + destruct (H a2 X2) as (a3 & P23 & X3). inversion P23; subst.
-    exists b; split; auto. exists a3; auto.
-  + exists b; split; auto. exists a2; auto.
+
+move=>X H a0 Xa0.
+exists (fun a => exists b, star a b /\ X b); split.
+- exists a0; split=>//; exact: star_refl.
+- move=>a1 [a2 [S12 X2]].
+  case: {-2}_ {-2}_ / S12 (eq_refl a1) (eq_refl a2).
+  + move=>? _ ->.
+    move: (H a2 X2)=>[a3 [P23 X3]].
+    case: {-2}_ {-2}_ / P23 (eq_refl a2) (eq_refl a3) =>? b ?? S _ E.
+    rewrite {}E in S.
+    exists b; split=>//.
+    by exists a3.
+  + move=>? b ?? S _ E; rewrite {}E in S.
+    exists b; split=>//.
+    by exists a2.
 Qed.
 
 (** ** Determinism properties for functional transition relations. *)
@@ -216,12 +245,14 @@ Hypothesis R_functional:
 Lemma star_star_inv:
   forall a b, star a b -> forall c, star a c -> star b c \/ star c b.
 Proof.
-  induction 1; intros.
-- auto.
-- inversion H1; subst.
-+ right. eauto using star. 
-+ assert (b = b0) by (eapply R_functional; eauto). subst b0. 
-  apply IHstar; auto.
+move=>??; elim.
+- by move=>???; left.
+- move=>a ?? HR S IH c S1.
+  case: {-1}_ {-2}_ / S1 (eq_refl a) (eq_refl c).
+  + move=>? E1 E2. rewrite {}E1 {}E2 in HR *.
+    by right; apply/star_step/S.
+  + move=>??? HR2 S2 E1 E2; rewrite {}E1 in HR; rewrite {}E2 in S S2 *.
+    by apply: IH; rewrite (R_functional HR HR2).
 Qed.
 
 Lemma finseq_unique:
@@ -230,9 +261,12 @@ Lemma finseq_unique:
   star a b' -> irred b' ->
   b = b'.
 Proof.
-  intros. destruct (star_star_inv H H1).
-- inversion H3; subst. auto. elim (H0 _ H4).
-- inversion H3; subst. auto. elim (H2 _ H4).
+move=>? b c S1 Ib S2 Ic.
+case: (star_star_inv S1 S2)=>S.
+- case: {-1}_ {-2}_ / S (eq_refl b) (eq_refl c) => // ??? HR _ E _; rewrite {}E in Ib.
+  by exfalso; apply/Ib/HR.
+- case: {-1}_ {-2}_ / S (eq_refl c) (eq_refl b) => // ??? HR _ E _; rewrite {}E in Ic.
+  by exfalso; apply/Ic/HR.
 Qed.
 
 (** A state cannot both diverge and terminate on an irreducible state. *)
@@ -240,27 +274,25 @@ Qed.
 Lemma infseq_inv':
   forall a b, R a b -> infseq a -> infseq b.
 Proof.
-  intros a b Rab Ia. 
-  destruct (infseq_inv Ia) as (b' & Rab' & Xb').
-  assert (b' = b) by (eapply R_functional; eauto). 
-  subst b'. auto.
+move=>?? Rab Ia.
+move: (infseq_inv Ia)=>[? [Rab0 ?]].
+by rewrite (R_functional Rab Rab0).
 Qed.
 
 Lemma infseq_star_inv:
   forall a b, star a b -> infseq a -> infseq b.
 Proof.
-  induction 1; intros.
-- auto. 
-- apply IHstar. apply infseq_inv' with a; auto.
+move=>??; elim=>// ????? IH Ia1.
+by apply/IH/infseq_inv'/Ia1.
 Qed.
 
 Lemma infseq_finseq_excl:
   forall a b,
-  star a b -> irred b -> infseq a -> False.
+  star a b -> irred b -> ~ infseq a.
 Proof.
-  intros.
-  destruct (@infseq_inv b) as (c & Rbc & _). eapply infseq_star_inv; eauto. 
-  apply (H0 c); auto.
+move=>? b S Ib I.
+move: (infseq_star_inv S I) => /infseq_inv [c [? _]].
+by apply: (Ib c).
 Qed.
 
 (** If there exists an infinite sequence of transitions from [a],
@@ -269,12 +301,9 @@ Qed.
 Lemma infseq_all_seq_inf:
   forall a, infseq a -> all_seq_inf a.
 Proof.
-  intros. unfold all_seq_inf. intros.
-  destruct (@infseq_inv b) as (c & Rbc & _). eapply infseq_star_inv; eauto.
-  exists c; auto.
+move=>? I ? S.
+move: (infseq_star_inv S I) => /infseq_inv [c [? _]].
+by exists c.
 Qed.
 
 End SEQUENCES.
-
-
-

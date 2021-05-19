@@ -1,12 +1,30 @@
 (** Hoare logic. *)
 
-From Coq Require Import Arith ZArith Lia Bool String List Program.Equality.
+From Coq Require Import ssreflect ssrfun ssrbool Lia Bool String List (*Program.Equality*).
+From mathcomp Require Import ssrint ssralg ssrnum eqtype zify.
 From Coq Require Import FunctionalExtensionality.
 From CDF Require Import Sequences.
 
 Local Open Scope string_scope.
-Local Open Scope Z_scope.
+Local Open Scope ring_scope.
 Local Open Scope list_scope.
+
+
+(* TODO move *)
+Definition eq_string (a b : string) : bool :=
+  match string_dec a b with left _ => true| right _ => false end.
+
+Lemma eq_string_refl : forall s, eq_string s s.
+Proof.
+elim=> // h t; rewrite /eq_string.
+case: (string_dec _ _) => // _ _; by case: (string_dec _ _).
+Qed.
+
+Lemma eq_stringP : Equality.axiom eq_string.
+Proof. move=> x y; apply: (iffP idP); rewrite /eq_string; by case: (string_dec _ _). Qed.
+
+Canonical Structure string_eqMixin := EqMixin eq_stringP.
+Canonical Structure string_eqType := Eval hnf in EqType _ string_eqMixin.
 
 Ltac inv H := inversion H; clear H; subst.
 
@@ -19,7 +37,7 @@ Definition ident := string.
 (** The abstract syntax: an arithmetic expression is either... *)
 
 Inductive aexp : Type :=
-  | CONST (n: Z)                       (**r a constant, or *)
+  | CONST (n: int)                     (**r a constant, or *)
   | VAR (x: ident)                     (**r a variable, or *)
   | PLUS (a1: aexp) (a2: aexp)         (**r a sum of two expressions, or *)
   | MINUS (a1: aexp) (a2: aexp).       (**r a difference of two expressions *)
@@ -28,9 +46,9 @@ Inductive aexp : Type :=
   the integer value denoted by an expression.  This function is
   parameterized by a store [s] that associates values to variables. *)
 
-Definition store : Type := ident -> Z.
+Definition store : Type := ident -> int.
 
-Fixpoint aeval (a: aexp) (s: store) : Z :=
+Fixpoint aeval (a: aexp) (s: store) : int :=
   match a with
   | CONST n => n
   | VAR x => s x
@@ -59,8 +77,8 @@ Fixpoint beval (b: bexp) (s: store) : bool :=
   match b with
   | TRUE => true
   | FALSE => false
-  | EQUAL a1 a2 => aeval a1 s =? aeval a2 s
-  | LESSEQUAL a1 a2 => aeval a1 s <=? aeval a2 s
+  | EQUAL a1 a2 => aeval a1 s == aeval a2 s
+  | LESSEQUAL a1 a2 => aeval a1 s <= aeval a2 s
   | NOT b1 => negb (beval b1 s)
   | AND b1 b2 => beval b1 s && beval b2 s
   end.
@@ -97,17 +115,17 @@ Infix ";;" := SEQ (at level 80, right associativity).
 
 (** Reduction semantics. *)
 
-Definition update (x: ident) (v: Z) (s: store) : store :=
-  fun y => if string_dec x y then v else s y.
+Definition update (x: ident) (v: int) (s: store) : store :=
+  fun y => if x == y then v else s y.
 
 Lemma update_same: forall x v s, (update x v s) x = v.
 Proof.
-  unfold update; intros. destruct (string_dec x x); congruence.
+by rewrite /update=>???; rewrite eq_refl.
 Qed.
 
 Lemma update_other: forall x v s y, x <> y -> (update x v s) y = s y.
 Proof.
-  unfold update; intros. destruct (string_dec x y); congruence.
+by rewrite /update=>?????; case: eqP.
 Qed.
 
 (** The relation [ red (c, s) (c', s') ], written [ c / s --> c' / s' ]
@@ -133,15 +151,15 @@ Inductive red: com * store -> com * store -> Prop :=
   | red_ifthenelse: forall b c1 c2 s,
       red (IFTHENELSE b c1 c2, s) ((if beval b s then c1 else c2), s)
   | red_while_done: forall b c s,
-      beval b s = false ->
+      ~~ beval b s ->
       red (WHILE b c, s) (SKIP, s)
   | red_while_loop: forall b c s,
-      beval b s = true ->
+      beval b s ->
       red (WHILE b c, s) (SEQ c (WHILE b c), s)
   | red_havoc: forall x s n,
       red (HAVOC x, s) (SKIP, update x n s)
   | red_assert: forall b s,
-      beval b s = true ->
+      beval b s ->
       red (ASSERT b, s) (SKIP, s).
 
 (** The predicate [ error c s ] means that command [c] started in state [s]
@@ -150,7 +168,7 @@ Inductive red: com * store -> com * store -> Prop :=
 
 Fixpoint error (c: com) (s: store) : Prop :=
   match c with
-  | ASSERT b => beval b s = false
+  | ASSERT b => ~~ beval b s
   | (c1 ;; c2) => error c1 s
   | _ => False
   end.
@@ -169,17 +187,17 @@ Definition goeswrong (c: com) (s: store) : Prop :=
 
 (** Hoare logic manipulates formulas / claims / assertions that "talk about"
     the values of the program variables.  A typical assertion is
-    [0 <= x /\ x <= y], meaning "at this program point, the value of 
+    [0 <= x /\ x <= y], meaning "at this program point, the value of
     variable [x] is positive and less than or equal to the value of
     variable [y]". *)
 
 (** In our Coq development, we represent assertions by Coq logical formulas
     (type [Prop]) parameterized by the current store, which provides
     the values of the variables.
-  
+
     For example, the assertion [0 <= x /\ x <= y] above is represented
     by the Coq predicate [fun s => 0 <= s "x" /\ s "x" <= s "y"]. *)
-    
+
 Definition assertion : Type := store -> Prop.
 
 (** Here are some useful assertions.
@@ -193,16 +211,16 @@ Definition aor (P Q: assertion) : assertion :=
 
 (** The assertion "arithmetic expression [a] evaluates to value [v]". *)
 
-Definition aequal (a: aexp) (v: Z) : assertion :=
+Definition aequal (a: aexp) (v: int) : assertion :=
   fun s => aeval a s = v.
 
 (** The assertions "Boolean expression [b] evaluates to true / to false". *)
 
 Definition atrue (b: bexp) : assertion :=
-  fun s => beval b s = true.
+  fun s => beval b s.
 
 Definition afalse (b: bexp) : assertion :=
-  fun s => beval b s = false.
+  fun s => ~~ beval b s.
 
 (** The assertion written "[ P[x <- a] ]" in the literature.
     Substituting [a] for [x] in [P] amounts to evaluating [P] in
@@ -279,7 +297,7 @@ where "⦃ P ⦄ c ⦃ Q ⦄" := (Hoare P c Q).
 
 Reserved Notation "〚 P 〛 c 〚 Q 〛" (at level 90, c at next level).
 
-Definition alessthan (a: aexp) (v: Z) : assertion :=
+Definition alessthan (a: aexp) (v: int) : assertion :=
   fun s => 0 <= aeval a s < v.
 
 Inductive HOARE: assertion -> com -> assertion -> Prop :=
@@ -296,7 +314,7 @@ Inductive HOARE: assertion -> com -> assertion -> Prop :=
       〚 afalse b //\\ P 〛 c2 〚 Q 〛 ->
       〚 P 〛 IFTHENELSE b c1 c2 〚 Q 〛
   | HOARE_while: forall P b c a,
-      (forall v, 
+      (forall v,
          〚 atrue b //\\ aequal a v //\\ P 〛 c 〚 alessthan a v //\\ P 〛) ->
       〚 P 〛 WHILE b c 〚 afalse b //\\ P 〛
   | HOARE_havoc: forall x Q,
@@ -318,7 +336,8 @@ Lemma Hoare_consequence_pre: forall P P' Q c,
       P' -->> P ->
       ⦃ P' ⦄ c ⦃ Q ⦄.
 Proof.
-  intros. apply Hoare_consequence with (P := P) (Q := Q); unfold aimp; auto.
+move=>???? H ?.
+by apply: Hoare_consequence; first by exact: H.
 Qed.
 
 Lemma Hoare_consequence_post: forall P Q Q' c,
@@ -326,7 +345,8 @@ Lemma Hoare_consequence_post: forall P Q Q' c,
       Q -->> Q' ->
       ⦃ P ⦄ c ⦃ Q' ⦄.
 Proof.
-  intros. apply Hoare_consequence with (P := P) (Q := Q); unfold aimp; auto.
+move=>???? H ?.
+by apply: Hoare_consequence; first by exact: H.
 Qed.
 
 Lemma Floyd_assign: forall P x a,
@@ -334,18 +354,20 @@ Lemma Floyd_assign: forall P x a,
                           aequal (VAR x) v //\\
                           aupdate x (CONST x0) (P //\\ aequal a v))) ⦄.
 Proof.
-  intros. eapply Hoare_consequence_pre. apply Hoare_assign.
-  intros s Ps.
-  set (x0 := s x).
-  set (v := aeval a s).
-  set (s' := update x v s).
-  set (s'' := update x x0 s').
-  assert (s'' = s).
-  { apply functional_extensionality; intros.
-    unfold s'', s', update. destruct (string_dec x x1). subst x1; auto. auto. } 
-  unfold aupdate. exists x0. exists v.
-  split. red; cbn. apply update_same.
-  cbn; fold v; fold s'; fold s''. rewrite H. split; auto. red; auto.
+move=>? x a.
+apply: Hoare_consequence_pre; first by apply: Hoare_assign.
+move=>s Ps.
+set (x0 := s x).
+set (v := aeval a s).
+set (s' := update x v s).
+set (s'' := update x x0 s').
+have EQ: (s'' = s).
+- apply: functional_extensionality=>?.
+  rewrite /s'' /s' /x0 /update.
+  by case: eqP=>//->.
+rewrite /aupdate. exists x0, v; split=>/=.
+- by apply: update_same.
+by rewrite -/v -/s' -/s'' EQ; split.
 Qed.
 
 (** Some derived constructs, with proof rules. *)
@@ -355,8 +377,10 @@ Lemma Hoare_ifthen: forall b c P Q,
     afalse b //\\ P -->> Q ->
     ⦃ P ⦄ IFTHENELSE b c SKIP ⦃ Q ⦄.
 Proof.
-  intros. apply Hoare_ifthenelse; auto.
-  apply Hoare_consequence_pre with Q; auto using Hoare_skip.
+move=>????? H.
+apply: Hoare_ifthenelse=>//.
+apply/Hoare_consequence_pre/H.
+by exact: Hoare_skip.
 Qed.
 
 Definition DOWHILE (c: com) (b: bexp) : com :=
@@ -366,21 +390,22 @@ Lemma Hoare_dowhile: forall P b c Q,
   ⦃ P ⦄ c ⦃ Q ⦄ -> (atrue b //\\ Q -->> P) ->
   ⦃ P ⦄ DOWHILE c b ⦃ afalse b //\\ Q ⦄.
 Proof.
-  intros. apply Hoare_seq with Q. auto.
-  apply Hoare_while. apply Hoare_consequence_pre with P; auto.
+move=>???? H ?.
+apply: Hoare_seq; first by exact: H.
+by apply/Hoare_while/Hoare_consequence_pre; first by exact: H.
 Qed.
 
 (** A frame rule for strong triples.  Used to reason about "for" loops below. *)
 
-Fixpoint assigns (c: com) (x: ident) : Prop :=
+Fixpoint assigns (c: com) (x: ident) : bool :=
   match c with
-  | SKIP => False
-  | ASSIGN y a => x = y
-  | SEQ c1 c2 => assigns c1 x \/ assigns c2 x
-  | IFTHENELSE b c1 c2 => assigns c1 x \/ assigns c2 x
+  | SKIP => false
+  | ASSIGN y a => x == y
+  | SEQ c1 c2 => assigns c1 x || assigns c2 x
+  | IFTHENELSE b c1 c2 => assigns c1 x || assigns c2 x
   | WHILE b c => assigns c x
-  | ASSERT b => False
-  | HAVOC y => x = y
+  | ASSERT b => false
+  | HAVOC y => x == y
   end.
 
 Definition independent (A: assertion) (vars: ident -> Prop) : Prop :=
@@ -388,12 +413,14 @@ Definition independent (A: assertion) (vars: ident -> Prop) : Prop :=
   (forall x, ~ vars x -> s1 x = s2 x) ->
   A s1 -> A s2.
 
+(*
 Ltac Tauto :=
   let s := fresh "s" in
   unfold aand, aor, aimp in *;
   intro s;
   repeat (match goal with [ H: (forall (s': store), _) |- _ ] => specialize (H s) end);
   intuition auto.
+*)
 
 Lemma HOARE_frame:
   forall R P c Q,
@@ -401,44 +428,50 @@ Lemma HOARE_frame:
   independent R (assigns c) ->
   〚 P //\\ R 〛 c 〚 Q //\\ R 〛.
 Proof.
-  intros R.
-  assert (IND_SUB: forall (vars1 vars2: ident -> Prop),
-                   independent R vars1 -> 
-                   (forall x, vars2 x -> vars1 x) ->
-                   independent R vars2).
-  { unfold independent; intros. apply H with s1; auto. }
-  induction 1; intros IND; simpl in IND.
-- apply HOARE_skip.
-- eapply HOARE_consequence with (Q := P //\\ R).
-  apply HOARE_assign.
-  unfold aupdate; intros s [A B]. split. auto. apply IND with s; auto.
-  intros y DIFF. rewrite update_other; auto.
-  Tauto.
-- apply HOARE_seq with (Q //\\ R).
-  apply IHHOARE1. eapply IND_SUB; eauto. cbn; intros; tauto.
-  apply IHHOARE2. eapply IND_SUB; eauto. cbn; intros; tauto.
-- apply HOARE_ifthenelse.
-  eapply HOARE_consequence with (Q := Q //\\ R).
-  apply IHHOARE1. eapply IND_SUB; eauto. cbn; intros; tauto.
-  Tauto. Tauto.
-  eapply HOARE_consequence with (Q := Q //\\ R).
-  apply IHHOARE2. eapply IND_SUB; eauto. cbn; intros; tauto.
-  Tauto. Tauto.
-- eapply HOARE_consequence with (P := P //\\ R).
-  apply HOARE_while with a. intros.
-  eapply HOARE_consequence. apply (H0 v). auto.
-  Tauto. Tauto. Tauto. Tauto.
-- eapply HOARE_consequence with (Q := Q //\\ R).
-  apply HOARE_havoc. 
-  intros s [A B] n; split. apply A. apply IND with s; auto. 
-  intros y DIFF. rewrite update_other; auto.
-  Tauto.
-- eapply HOARE_consequence.
-  apply HOARE_assert with (P := P //\\ R). Tauto. Tauto.
-- eapply HOARE_consequence. 
-  apply IHHOARE; auto.
-  intros s [A B]; split; auto.
-  intros s [A B]; split; auto.
+move=>R ???.
+have IND_SUB: forall (vars1 vars2: ident -> Prop),
+              independent R vars1 ->
+              (forall x, vars2 x -> vars1 x) ->
+              independent R vars2.
+- rewrite /independent=>?? H H0 ?? HE.
+  apply/H=>? H1; apply/HE; move: H1.
+  by apply/contra_not/H0.
+elim=>/=.
+- by move=>??; apply: HOARE_skip.
+- move=>P ?? IND.
+  apply: (@HOARE_consequence _ (P //\\ R)); first by [apply: HOARE_assign]; last by [].
+  rewrite /aupdate=>? [? B]; split=>//.
+  apply/IND/B=>??.
+  by rewrite update_other // => /eqP; rewrite eq_sym.
+- move=>? Q ???? IH1 ? IH2 HR.
+  apply: (@HOARE_seq _ (Q //\\ R)).
+  - apply/IH1/(@IND_SUB _ _ HR)=>??.
+    by apply/orP; left.
+  apply/IH2/(@IND_SUB _ _ HR)=>??.
+  by apply/orP; right.
+- move=>? Q ???? IH1 ? IH2 HR.
+  apply: HOARE_ifthenelse; (apply: (@HOARE_consequence _ (Q //\\ R)); last by []).
+  - by apply/IH1/(@IND_SUB _ _ HR)=>??; apply/orP; left.
+  - by move=>? /and_assoc.
+  - by apply/IH2/(@IND_SUB _ _ HR)=>??; apply/orP; right.
+  - by move=>? /and_assoc.
+- move=>P ?? a ? H ?.
+  apply: (@HOARE_consequence (P //\\ R)); try by [].
+  - apply: (@HOARE_while _ _ _ a) =>?.
+    apply: HOARE_consequence; first by [apply: H].
+    - by move=>?[?][?][?].
+    by move=>? /and_assoc.
+  by move=>? /and_assoc.
+- move=>? Q IND.
+  apply: (@HOARE_consequence _ (Q //\\ R)); last by [].
+  - by apply: HOARE_havoc.
+  move=>? [AQ Rs] n; split; first by exact: AQ.
+  apply/IND/Rs=>??.
+  by rewrite update_other // => /eqP; rewrite eq_sym.
+- move=>P ??.
+  by apply: HOARE_consequence; first by [exact: (@HOARE_assert (P //\\ R))]; move=>? /and_assoc.
+- move=>?????? IH HP HQ ?.
+  by apply: HOARE_consequence; first by [apply: IH]; move=>?[??]; split=>//; [apply: HP| apply: HQ].
 Qed.
 
 (** A counted "for" loop. *)
@@ -451,27 +484,23 @@ Lemma HOARE_for: forall l h i c P,
   〚 atrue (LESSEQUAL (VAR i) (VAR h)) //\\ P 〛
     c
   〚 aupdate i (PLUS (VAR i) (CONST 1)) P 〛 ->
-  ~assigns c i -> ~assigns c h -> i <> h -> 
+  ~assigns c i -> ~assigns c h -> i <> h ->
   〚 aupdate i l P 〛 FOR i l h c 〚 afalse (LESSEQUAL (VAR i) (VAR h)) //\\ P 〛.
 Proof.
-  intros. apply HOARE_seq with P. apply HOARE_assign.
-  set (variant := PLUS (MINUS (VAR h) (VAR i)) (CONST 1)).
-  apply HOARE_while with (a := variant).
-  intro v.
-  eapply HOARE_seq.
-  eapply HOARE_consequence.
-  apply HOARE_frame with (R := aequal variant v //\\ atrue (LESSEQUAL (VAR i) (VAR h))).
-  eexact H.
-  intros s1 s2 E. unfold aequal, atrue, aand; simpl.
-  rewrite (E i), (E h) by auto. auto.
-  Tauto.
-  intros s A. eexact A.
-  eapply HOARE_consequence with (Q := alessthan variant v //\\ P).
-  apply HOARE_assign.
-  intros s (A & B & C). unfold aequal in B; simpl in B. unfold atrue in C; simpl in C. apply Z.leb_le in C.
-  split. red; simpl. rewrite update_same. rewrite update_other by auto. lia.
-  exact A.
-  Tauto.
+move=>? h i ? P H ???.
+apply: (@HOARE_seq _ P); first by apply: HOARE_assign.
+set (variant := PLUS (MINUS (VAR h) (VAR i)) (CONST 1)).
+apply: (@HOARE_while _ _ _ variant)=>v.
+apply: HOARE_seq.
+- apply: HOARE_consequence.
+  - apply: (@HOARE_frame (aequal variant v //\\ atrue (LESSEQUAL (VAR i) (VAR h)))); first by exact: H.
+    by move=>?? E; rewrite /aequal /atrue /aand /= !E.
+  - by move=>?[?][?]?.
+  by move=>? A; exact: A.
+apply: (@HOARE_consequence _ (alessthan variant v //\\ P)); first by [exact: HOARE_assign]; try by [].
+move=>?[A][B]C; rewrite /aequal /= in B; rewrite /atrue /= in C.
+split=>//=.
+by rewrite /alessthan /variant /= update_same update_other //; lia.
 Qed.
 
 (** Some inversion lemmas. *)
@@ -479,9 +508,11 @@ Qed.
 Lemma Hoare_skip_inv: forall P Q,
   ⦃ P ⦄ SKIP ⦃ Q ⦄ -> (P -->> Q).
 Proof.
-  intros P Q H; dependent induction H.
-- red; auto.
-- red; intros. apply H1, IHHoare, H0; auto.
+move=>P Q H.
+elim: _ {-1}_ _ /H (erefl P) (erefl SKIP) (erefl Q)=>//.
+- by move=>? _ _ _.
+- move=>?????? IH H1 H2 _ ? _ ??.
+  by apply/H2/IH=>//; apply: H1.
 Qed.
 
 Lemma Hoare_assign_inv: forall x a P Q,
@@ -530,7 +561,7 @@ Lemma Hoare_havoc_inv: forall x P Q,
 Proof.
   intros x P Q H; dependent induction H.
 - red; auto.
-- intros s Ps n. apply H1. apply IHHoare; auto. 
+- intros s Ps n. apply H1. apply IHHoare; auto.
 Qed.
 
 Lemma Hoare_assert_inv: forall b P Q,
@@ -554,7 +585,7 @@ Proof.
 - apply Hoare_skip_inv in H. apply Hoare_skip_inv in H0.
   eapply Hoare_consequence_post. apply Hoare_skip. Tauto.
 - apply Hoare_assign_inv in H. apply Hoare_assign_inv in H0.
-  eapply Hoare_consequence_pre. apply Hoare_assign. unfold aupdate in *; Tauto. 
+  eapply Hoare_consequence_pre. apply Hoare_assign. unfold aupdate in *; Tauto.
 - apply Hoare_seq_inv in H. destruct H as (R1 & C11 & C21).
   apply Hoare_seq_inv in H0. destruct H0 as (R2 & C12 & C22).
   apply Hoare_seq with (R1 //\\ R2); auto.
@@ -576,7 +607,7 @@ Proof.
 - apply Hoare_havoc_inv in H.
   apply Hoare_havoc_inv in H0.
   eapply Hoare_consequence_pre. apply Hoare_havoc.
-  unfold aupdate, aforall in *; Tauto. 
+  unfold aupdate, aforall in *; Tauto.
 Qed.
 
 Lemma Hoare_disj:
@@ -588,7 +619,7 @@ Proof.
 - apply Hoare_skip_inv in H. apply Hoare_skip_inv in H0.
   eapply Hoare_consequence_post. apply Hoare_skip. Tauto.
 - apply Hoare_assign_inv in H. apply Hoare_assign_inv in H0.
-  eapply Hoare_consequence_pre. apply Hoare_assign. unfold aupdate in *; Tauto. 
+  eapply Hoare_consequence_pre. apply Hoare_assign. unfold aupdate in *; Tauto.
 - apply Hoare_seq_inv in H. destruct H as (R1 & C11 & C21).
   apply Hoare_seq_inv in H0. destruct H0 as (R2 & C12 & C22).
   apply Hoare_seq with (R1 \\// R2); auto.
@@ -610,7 +641,7 @@ Proof.
 - apply Hoare_havoc_inv in H.
   apply Hoare_havoc_inv in H0.
   eapply Hoare_consequence_pre. apply Hoare_havoc.
-  unfold aupdate, aforall in *; Tauto. 
+  unfold aupdate, aforall in *; Tauto.
 Qed.
 
 Definition choice_axiom :=
@@ -626,7 +657,7 @@ Lemma Hoare_exists:
 Proof.
   intros CHOICE X. induction c; intros P Q H.
 - assert (H': forall x, P x -->> Q x) by (intros; apply Hoare_skip_inv; auto).
-  eapply Hoare_consequence_pre. apply Hoare_skip. 
+  eapply Hoare_consequence_pre. apply Hoare_skip.
   intros s (x & Px). exists x; apply H'; auto.
 - assert (H': forall y, P y -->> aupdate x a (Q y)).
   { intros. apply Hoare_assign_inv. auto. }
@@ -654,12 +685,12 @@ Proof.
   eapply Hoare_consequence with (P := aexists Inv).
   apply Hoare_while.
   apply Hoare_consequence_pre with (P := aexists (fun x => atrue b //\\ Inv x)).
-  apply IHc. intros x. apply H'. 
+  apply IHc. intros x. apply H'.
   intros s (A & x & B); exists x; split; auto.
   intros s (x & A). exists x; apply H'; auto.
   intros s (A & x & B); exists x; apply H'; split; auto.
 - intros.
-  set (REL := fun (x : X) (R: assertion) => 
+  set (REL := fun (x : X) (R: assertion) =>
                 (P x -->> atrue b //\\ R) /\ (atrue b //\\ R -->> Q x)).
   assert (H': exists R: X -> assertion, forall x: X, REL x (R x)).
   { apply CHOICE. intros x. apply Hoare_assert_inv. auto. }
@@ -687,7 +718,7 @@ Proof.
 - assert (H': forall y, P y -->> aupdate x a (Q y)).
   { intros. apply Hoare_assign_inv. auto. }
   eapply Hoare_consequence_pre. apply Hoare_assign.
-  intros s Ps y. apply H'. auto. 
+  intros s Ps y. apply H'. auto.
 - set (REL := fun (x : X) (R: assertion) => Hoare (P x) c1 R /\ Hoare R c2 (Q x)).
   assert (H': exists R: X -> assertion, forall x: X, REL x (R x)).
   { apply CHOICE. intros x. apply Hoare_seq_inv. auto. }
@@ -700,7 +731,7 @@ Proof.
   assert (H2: Hoare (aforall (fun x => afalse b //\\ P x)) c2 (aforall Q)).
   { apply IHc2. intros. specialize (H x). apply Hoare_ifthenelse_inv in H. tauto. }
   apply Hoare_ifthenelse; eapply Hoare_consequence_pre; eauto.
-  intros s (A & B) x. split; auto. 
+  intros s (A & B) x. split; auto.
   intros s (A & B) x. split; auto.
 - set (REL := fun (x : X) (Inv: assertion) =>
           Hoare (atrue b //\\ Inv) c Inv /\ (P x -->> Inv) /\ (afalse b //\\ Inv -->> Q x)).
@@ -710,12 +741,12 @@ Proof.
   eapply Hoare_consequence with (P := aforall Inv).
   apply Hoare_while.
   apply Hoare_consequence_pre with (P := aforall (fun x => atrue b //\\ Inv x)).
-  apply IHc. intros x. apply H'. 
+  apply IHc. intros x. apply H'.
   intros s [A B] x; split; auto.
   intros s A x. apply H'; auto.
   intros s [A B] x. apply H'; split; auto.
 - intros.
-  set (REL := fun (x : X) (R: assertion) => 
+  set (REL := fun (x : X) (R: assertion) =>
                 (P x -->> atrue b //\\ R) /\ (atrue b //\\ R -->> Q x)).
   assert (H': exists R: X -> assertion, forall x: X, REL x (R x)).
   { apply CHOICE. intros x. apply Hoare_assert_inv. auto. }
@@ -801,8 +832,8 @@ Proof.
   intros P c Q s HO Ps; split.
 - intros (c' & s' & RED & STUCK).
   destruct (Hoare_steps _ _ _ _ _ _ HO Ps RED) as (P' & HO' & Ps').
-  eapply Hoare_safe; eauto. 
-- intros s' (c' & RED & TERM). red in TERM. subst c'.  
+  eapply Hoare_safe; eauto.
+- intros s' (c' & RED & TERM). red in TERM. subst c'.
   destruct (Hoare_steps _ _ _ _ _ _ HO Ps RED) as (P' & HO' & Ps').
   eapply Hoare_skip_inv; eauto.
 Qed.
@@ -837,7 +868,7 @@ Lemma Triple_assign: forall P x a,
       〚〚 aupdate x a P 〛〛 ASSIGN x a 〚〚 P 〛〛.
 Proof.
   intros P x a s PRE. apply safe_step.
-- unfold terminated; congruence. 
+- unfold terminated; congruence.
 - cbn; tauto.
 - intros c' s' RED; inv RED. apply safe_now. reflexivity. exact PRE.
 Qed.
@@ -848,7 +879,7 @@ Remark safe_seq:
   forall c s, safe Q c s -> safe R (c ;; c') s.
 Proof.
   intros Q R c2 QR. induction 1.
-  - rewrite H. apply safe_step. unfold terminated; congruence. cbn; auto. 
+  - rewrite H. apply safe_step. unfold terminated; congruence. cbn; auto.
     intros c' s' RED; inv RED. apply QR; auto.
     inv H2.
   - apply safe_step. unfold terminated; congruence. cbn; auto.
@@ -887,7 +918,7 @@ Proof.
   intros P variant b c T.
   assert (REC: forall v s, P s -> aeval variant s = v ->
                safe (afalse b //\\ P) (WHILE b c) s ).
-  { induction v using (well_founded_induction (Z.lt_wf 0)).
+  { induction v using (well_founded_induction (int.lt_wf 0)).
     intros. apply safe_step. unfold terminated; congruence. cbn; auto.
     intros c' s' RED; inv RED.
   - apply safe_now. red; auto. split; auto.
@@ -971,7 +1002,7 @@ Lemma safe_step_inv: forall Q c s c' s',
   safe Q c s -> red (c, s) (c', s') -> safe Q c' s'.
 Proof.
   intros. inv H. red in H1; subst c; inv H0. eauto.
-Qed. 
+Qed.
 
 Definition triple (P: assertion) (c: com) (Q: assertion) : Prop :=
   forall s, P s -> safe Q c s.
@@ -988,7 +1019,7 @@ Lemma triple_assign: forall P x a,
       ⦃⦃ aupdate x a P ⦄⦄ ASSIGN x a ⦃⦃ P ⦄⦄.
 Proof.
   intros P x a s PRE. apply safe_step.
-- unfold terminated; congruence. 
+- unfold terminated; congruence.
 - cbn; tauto.
 - intros c' s' RED; inv RED. apply safe_now. reflexivity. exact PRE.
 Qed.
@@ -1142,7 +1173,7 @@ Qed.
 Lemma safe_step_inv: forall Q n c s c' s',
   safe Q (S n) c s -> red (c, s) (c', s') -> safe Q n c' s'.
 Proof.
-  intros. inv H. 
+  intros. inv H.
 - rewrite H2 in H0; inv H0.
 - eauto.
 Qed.
@@ -1159,7 +1190,7 @@ Lemma triple_assign: forall P x a,
       ⦃⦃ aupdate x a P ⦄⦄ ASSIGN x a ⦃⦃ P ⦄⦄.
 Proof.
   intros P x a n s PRE. destruct n. constructor. apply safe_step.
-- unfold terminated; congruence. 
+- unfold terminated; congruence.
 - cbn; tauto.
 - intros c' s' RED; inv RED. apply triple_skip. exact PRE.
 Qed.
@@ -1173,11 +1204,11 @@ Proof.
 - constructor.
 - apply safe_step. unfold terminated; congruence.
   + cbn. eapply safe_notstuck; eauto.
-  + intros c' s' RED. inv RED. 
+  + intros c' s' RED. inv RED.
     * apply QR. lia. eapply safe_terminated_inv; eauto. red; auto.
-    * apply IHn. 
+    * apply IHn.
       intros; apply QR; auto.
-      eapply safe_step_inv; eauto. 
+      eapply safe_step_inv; eauto.
 Qed.
 
 Lemma triple_seq: forall P Q R c1 c2,
@@ -1193,7 +1224,7 @@ Lemma triple_while: forall P b c,
 Proof.
   intros P b c T. red. induction n; intros s Ps. constructor.
   apply safe_step. unfold terminated; congruence. cbn; auto.
-  intros c' s' RED; inv RED. 
+  intros c' s' RED; inv RED.
 - apply triple_skip. split; auto.
 - apply safe_seq with P. intros. apply safe_mono with n. apply IHn; auto. lia.
   apply T. split; auto.
@@ -1265,7 +1296,7 @@ Module Completeness.
 
 Import Soundness3.
 
-(** A weakest (liberal) precondition, defined in terms 
+(** A weakest (liberal) precondition, defined in terms
     of the operational semantics. *)
 
 Definition sem_wp (c: com) (Q: assertion) : assertion :=
@@ -1298,7 +1329,7 @@ Proof.
 - eapply Hoare_consequence_pre. apply Hoare_skip.
   intros s W. eapply safe_terminated_inv. eexact W. red; auto.
 - eapply Hoare_consequence_pre. apply Hoare_assign.
-  intros s W. 
+  intros s W.
   assert (W': safe Q SKIP (update x (aeval a s) s)).
   { eapply safe_step_inv. eexact W. apply red_assign. }
   apply safe_terminated_inv in W'. assumption. red; auto.
@@ -1307,10 +1338,10 @@ Proof.
   intros s; apply sem_wp_seq.
 - apply Hoare_ifthenelse.
   + eapply Hoare_consequence_pre. apply IHc1.
-    intros s [P1 P2]. replace c1 with (if beval b s then c1 else c2). 
+    intros s [P1 P2]. replace c1 with (if beval b s then c1 else c2).
     eapply safe_step_inv. eexact P2. constructor. rewrite P1; auto.
   + eapply Hoare_consequence_pre. apply IHc2.
-    intros s [P1 P2]. replace c2 with (if beval b s then c1 else c2). 
+    intros s [P1 P2]. replace c2 with (if beval b s then c1 else c2).
     eapply safe_step_inv. eexact P2. constructor. rewrite P1; auto.
 - eapply Hoare_consequence_post. apply Hoare_while.
   eapply Hoare_consequence_pre. apply IHc.
@@ -1319,17 +1350,17 @@ Proof.
   + intros s [P1 P2].
     eapply safe_terminated_inv. eapply safe_step_inv. eexact P2. apply red_while_done. exact P1. red; auto.
 - eapply Hoare_consequence. apply Hoare_assert.
-  + intros s SAFE. 
+  + intros s SAFE.
     assert (NOTSTUCK: ~ (error (ASSERT b) s)).
     { eapply safe_not_stuck; eauto. unfold terminated; congruence. }
-    assert (B: beval b s = true).
+    assert (B: beval b s).
     { cbn in NOTSTUCK. destruct (beval b s); auto. }
     assert (FINAL: Q s).
     { eapply safe_terminated_inv. eapply safe_step_inv. eexact SAFE. constructor. auto. red; auto. }
     split. exact B. exact FINAL.
   + intros s; unfold aand; tauto.
 - eapply Hoare_consequence_pre. apply Hoare_havoc.
-  intros s W n. 
+  intros s W n.
   assert (W': safe Q SKIP (update x n s)).
   { eapply safe_step_inv. eexact W. apply red_havoc. }
   apply safe_terminated_inv in W'. assumption. red; auto.
@@ -1340,7 +1371,7 @@ Qed.
 Theorem Hoare_complete:
   forall P c Q, ⦃⦃ P ⦄⦄ c ⦃⦃ Q ⦄⦄ -> ⦃ P ⦄ c ⦃ Q ⦄.
 Proof.
-  intros. apply Hoare_consequence_pre with (sem_wp c Q). 
+  intros. apply Hoare_consequence_pre with (sem_wp c Q).
   apply Hoare_sem_wp.
   intros s. apply H.
 Qed.
@@ -1496,7 +1527,3 @@ Proof.
 Qed.
 
 End SP.
-
-
-
-
