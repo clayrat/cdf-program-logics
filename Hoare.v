@@ -645,33 +645,46 @@ Lemma Hoare_disj:
   ⦃ P1 ⦄ c ⦃ Q1 ⦄ -> ⦃ P2 ⦄ c ⦃ Q2 ⦄ ->
   ⦃ P1 \\// P2 ⦄ c ⦃ Q1 \\// Q2 ⦄.
 Proof.
-  induction c; intros.
-- apply Hoare_skip_inv in H. apply Hoare_skip_inv in H0.
-  eapply Hoare_consequence_post. apply Hoare_skip. Tauto.
-- apply Hoare_assign_inv in H. apply Hoare_assign_inv in H0.
-  eapply Hoare_consequence_pre. apply Hoare_assign. unfold aupdate in *; Tauto.
-- apply Hoare_seq_inv in H. destruct H as (R1 & C11 & C21).
-  apply Hoare_seq_inv in H0. destruct H0 as (R2 & C12 & C22).
-  apply Hoare_seq with (R1 \\// R2); auto.
-- apply Hoare_ifthenelse_inv in H. destruct H as (C11 & C21).
-  apply Hoare_ifthenelse_inv in H0. destruct H0 as (C12 & C22).
-  apply Hoare_ifthenelse.
-  eapply Hoare_consequence_pre. eauto. Tauto.
-  eapply Hoare_consequence_pre. eauto. Tauto.
-- apply Hoare_while_inv in H. destruct H as (Inv1 & C1 & A1 & B1).
-  apply Hoare_while_inv in H0. destruct H0 as (Inv2 & C2 & A2 & B2).
-  eapply Hoare_consequence with (P := Inv1 \\// Inv2).
-  apply Hoare_while.
-  eapply Hoare_consequence_pre. eapply IHc; eauto. Tauto.
-  Tauto. Tauto.
-- intros. apply Hoare_assert_inv in H. destruct H as (R1 & A1 & B1).
-  apply Hoare_assert_inv in H0. destruct H0 as (R2 & A2 & B2).
-  eapply Hoare_consequence. eapply Hoare_assert with (P := R1 \\// R2).
-  Tauto. Tauto.
-- apply Hoare_havoc_inv in H.
-  apply Hoare_havoc_inv in H0.
-  eapply Hoare_consequence_pre. apply Hoare_havoc.
-  unfold aupdate, aforall in *; Tauto.
+elim.
+- move=>???? H1 H2.
+  move/Hoare_skip_inv: H1=>H1; move/Hoare_skip_inv: H2=>H2.
+  apply: Hoare_consequence_post; first by exact: Hoare_skip.
+  by move=>?; case; [left; apply:H1|right; apply:H2].
+- move=>?????? H1 H2.
+  move/Hoare_assign_inv: H1=>H1; move/Hoare_assign_inv: H2=>H2.
+  apply: Hoare_consequence_pre; first by exact: Hoare_assign.
+  by move=>?; case; [left; apply:H1|right; apply:H2].
+- move=>? IH1 ? IH2 ???? H1 H2.
+  move/Hoare_seq_inv: H1=>[R1 [??]].
+  move/Hoare_seq_inv: H2=>[R2 [??]].
+  by apply: (@Hoare_seq _ (R1 \\// R2)); [apply: IH1| apply: IH2].
+- move=>?? IH1 ? IH2 ???? H1 H2.
+  move/Hoare_ifthenelse_inv: H1=>[C11 C21].
+  move/Hoare_ifthenelse_inv: H2=>[C12 C22].
+  apply: Hoare_ifthenelse; apply: Hoare_consequence_pre.
+  - by apply/IH1/C12/C11.
+  - by move=>?[?]; case; [left|right].
+  - by apply/IH2/C22/C21.
+  - by move=>?[?]; case; [left|right].
+- move=>?? IH ???? H1 H2.
+  move/Hoare_while_inv: H1=>[Inv1][C1][A1]B1.
+  move/Hoare_while_inv: H2=>[Inv2][C2][A2]B2.
+  apply: (@Hoare_consequence (Inv1 \\// Inv2)).
+  - apply/Hoare_while/Hoare_consequence_pre.
+    - by apply/IH/C2/C1.
+    by move=>?[?]; case; [left|right].
+  - by move=>?; case; [left; apply:A1|right; apply:A2].
+  by move=>?[?]; case; [left; apply:B1|right; apply:B2].
+- move=>????? H1 H2.
+  move/Hoare_assert_inv: H1=>[R1][A1]B1.
+  move/Hoare_assert_inv: H2=>[R2][A2]B2.
+  apply: Hoare_consequence; first by exact: (@Hoare_assert (R1 \\// R2)).
+  - by move=>?; case; [move/A1|move/A2]; case=>??; split=>//; [left|right].
+  by move=>?[?]; case=>?; [left; apply:B1|right; apply:B2].
+move=>????? H1 H2.
+move/Hoare_havoc_inv: H1=>H1; move/Hoare_havoc_inv: H2=>H2.
+apply: Hoare_consequence_pre; first by exact: Hoare_havoc.
+by move=>?; case=>?; rewrite /aforall /aupdate=>?; [left; apply: H1|right; apply: H2].
 Qed.
 
 Definition choice_axiom :=
@@ -685,54 +698,49 @@ Lemma Hoare_exists:
   (forall x, ⦃ P x ⦄ c ⦃ Q x ⦄) ->
   ⦃ aexists P ⦄ c ⦃ aexists Q ⦄.
 Proof.
-  intros CHOICE X. induction c; intros P Q H.
-- assert (H': forall x, P x -->> Q x) by (intros; apply Hoare_skip_inv; auto).
-  eapply Hoare_consequence_pre. apply Hoare_skip.
-  intros s (x & Px). exists x; apply H'; auto.
-- assert (H': forall y, P y -->> aupdate x a (Q y)).
-  { intros. apply Hoare_assign_inv. auto. }
-  eapply Hoare_consequence_pre. apply Hoare_assign.
-  intros s (y & Py). exists y. apply H'; auto.
-- set (REL := fun (x : X) (R: assertion) => Hoare (P x) c1 R /\ Hoare R c2 (Q x)).
-  assert (H': exists R: X -> assertion, forall x: X, REL x (R x)).
-  { apply CHOICE. intros x. apply Hoare_seq_inv. auto. }
-  destruct H' as (R & H').
-  apply Hoare_seq with (aexists R).
-  apply IHc1. intros; apply H'.
-  apply IHc2. intros; apply H'.
-- assert (H1: Hoare (aexists (fun x => atrue b //\\ P x)) c1 (aexists Q)).
-  { apply IHc1. intros. specialize (H x). apply Hoare_ifthenelse_inv in H. tauto. }
-  assert (H2: Hoare (aexists (fun x => afalse b //\\ P x)) c2 (aexists Q)).
-  { apply IHc2. intros. specialize (H x). apply Hoare_ifthenelse_inv in H. tauto. }
-  apply Hoare_ifthenelse; eapply Hoare_consequence_pre; eauto.
-  intros s (A & x & B). exists x; split; auto.
-  intros s (A & x & B). exists x; split; auto.
-- set (REL := fun (x : X) (Inv: assertion) =>
-          Hoare (atrue b //\\ Inv) c Inv /\ (P x -->> Inv) /\ (afalse b //\\ Inv -->> Q x)).
-  assert (H': exists Inv: X -> assertion, forall x: X, REL x (Inv x)).
-  { apply CHOICE. intros x. apply Hoare_while_inv. auto. }
-  destruct H' as (Inv & H').
-  eapply Hoare_consequence with (P := aexists Inv).
-  apply Hoare_while.
-  apply Hoare_consequence_pre with (P := aexists (fun x => atrue b //\\ Inv x)).
-  apply IHc. intros x. apply H'.
-  intros s (A & x & B); exists x; split; auto.
-  intros s (x & A). exists x; apply H'; auto.
-  intros s (A & x & B); exists x; apply H'; split; auto.
-- intros.
-  set (REL := fun (x : X) (R: assertion) =>
-                (P x -->> atrue b //\\ R) /\ (atrue b //\\ R -->> Q x)).
-  assert (H': exists R: X -> assertion, forall x: X, REL x (R x)).
-  { apply CHOICE. intros x. apply Hoare_assert_inv. auto. }
-  destruct H' as (R & A).
-  eapply Hoare_consequence.
-  apply Hoare_assert with (P := aexists R).
-  intros s (x & Px). destruct (A x) as (B & C). apply B in Px. destruct Px. split; auto. exists x; auto.
-  intros s (Bs & x & Rx). destruct (A x) as (B & C). exists x. apply C. split; auto.
-- assert (H': forall y, P y -->> aforall (fun n => aupdate x (CONST n) (Q y))).
-  { intros. apply Hoare_havoc_inv. auto. }
-  eapply Hoare_consequence_pre. apply Hoare_havoc.
-  intros s (y & Py). exists y. apply H'; auto.
+move=>CHOICE X; elim.
+- move=>?? H.
+  apply: Hoare_consequence_pre; first by exact: Hoare_skip.
+  by move=>?[x ?]; exists x; apply: Hoare_skip_inv; first by apply: H.
+- move=>???? H.
+  apply: Hoare_consequence_pre; first by exact: Hoare_assign.
+  by move=>?[x ?]; exists x; apply: Hoare_assign_inv; first by apply: H.
+- move=>c1 IH1 c2 IH2 P Q ?.
+  set (REL := fun (x : X) (R: assertion) => Hoare (P x) c1 R /\ Hoare R c2 (Q x)).
+  have [R H']: exists R: X -> assertion, forall x: X, REL x (R x)
+   by apply: CHOICE=>?; apply: Hoare_seq_inv.
+  by apply: (@Hoare_seq _ (aexists R)); [apply: IH1|apply: IH2]=>y; case: (H' y).
+- move=>b c1 IH1 c2 IH2 P Q H.
+  have H1: Hoare (aexists (fun x => atrue b //\\ P x)) c1 (aexists Q)
+    by apply: IH1=>y; case: (Hoare_ifthenelse_inv _ _ _ _ _ (H y)).
+  have H2: Hoare (aexists (fun x => afalse b //\\ P x)) c2 (aexists Q)
+    by apply: IH2=>y; case: (Hoare_ifthenelse_inv _ _ _ _ _ (H y)).
+  by apply: Hoare_ifthenelse; apply: Hoare_consequence_pre;
+  [apply: H1| |apply: H2|]=>?[?][x ?]; exists x.
+- move=>b c IH P Q ?.
+  set REL := fun (x : X) (Inv: assertion) =>
+    Hoare (atrue b //\\ Inv) c Inv /\ (P x -->> Inv) /\ (afalse b //\\ Inv -->> Q x).
+  have [Inv H']: exists Inv: X -> assertion, forall x: X, REL x (Inv x)
+    by apply: CHOICE=>?; apply: Hoare_while_inv.
+  apply: (@Hoare_consequence (aexists Inv)).
+  - apply: Hoare_while.
+    apply: (@Hoare_consequence_pre (aexists (fun x => atrue b //\\ Inv x))).
+    - by apply: IH=>x; case: (H' x).
+    by move=>?[?][x ?]; exists x.
+  - by move=>?[x ?]; exists x; case: (H' x)=>_ [HP] _; apply: HP.
+  by move=>?[?][x ?]; exists x; case: (H' x)=>_[_]; apply.
+- move=>b P Q ?.
+  set REL := fun (x : X) (R: assertion) =>
+                (P x -->> atrue b //\\ R) /\ (atrue b //\\ R -->> Q x).
+  have [R A]: exists R: X -> assertion, forall x: X, REL x (R x)
+    by apply: CHOICE=>?; apply: Hoare_assert_inv.
+  apply: Hoare_consequence; first by apply: (@Hoare_assert (aexists R)).
+  - move=>?[x Px]; move: (A x)=>[B ?]; case: (B _ Px)=>??; split=>//.
+    by exists x.
+  by move=>?[?][x ?]; exists x; case: (A x)=>[_]; apply.
+- move=>??? H.
+  apply: Hoare_consequence_pre; first by exact: Hoare_havoc.
+  by move=>?[x ?]?; exists x; apply: Hoare_havoc_inv; first by exact: H.
 Qed.
 
 Lemma Hoare_forall:
@@ -741,56 +749,49 @@ Lemma Hoare_forall:
   (forall x, ⦃ P x ⦄ c ⦃ Q x ⦄) ->
   ⦃ aforall P ⦄ c ⦃ aforall Q ⦄.
 Proof.
-  intros CHOICE X inhabited; induction c; intros P Q H.
-- assert (H': forall x, P x -->> Q x) by (intros; apply Hoare_skip_inv; auto).
-  eapply Hoare_consequence_pre. apply Hoare_skip.
-  intros s Ps x. apply H'. apply Ps.
-- assert (H': forall y, P y -->> aupdate x a (Q y)).
-  { intros. apply Hoare_assign_inv. auto. }
-  eapply Hoare_consequence_pre. apply Hoare_assign.
-  intros s Ps y. apply H'. auto.
-- set (REL := fun (x : X) (R: assertion) => Hoare (P x) c1 R /\ Hoare R c2 (Q x)).
-  assert (H': exists R: X -> assertion, forall x: X, REL x (R x)).
-  { apply CHOICE. intros x. apply Hoare_seq_inv. auto. }
-  destruct H' as (R & H').
-  apply Hoare_seq with (aforall R).
-  apply IHc1. intros; apply H'.
-  apply IHc2. intros; apply H'.
-- assert (H1: Hoare (aforall (fun x => atrue b //\\ P x)) c1 (aforall Q)).
-  { apply IHc1. intros. specialize (H x). apply Hoare_ifthenelse_inv in H. tauto. }
-  assert (H2: Hoare (aforall (fun x => afalse b //\\ P x)) c2 (aforall Q)).
-  { apply IHc2. intros. specialize (H x). apply Hoare_ifthenelse_inv in H. tauto. }
-  apply Hoare_ifthenelse; eapply Hoare_consequence_pre; eauto.
-  intros s (A & B) x. split; auto.
-  intros s (A & B) x. split; auto.
-- set (REL := fun (x : X) (Inv: assertion) =>
-          Hoare (atrue b //\\ Inv) c Inv /\ (P x -->> Inv) /\ (afalse b //\\ Inv -->> Q x)).
-  assert (H': exists Inv: X -> assertion, forall x: X, REL x (Inv x)).
-  { apply CHOICE. intros x. apply Hoare_while_inv. auto. }
-  destruct H' as (Inv & H').
-  eapply Hoare_consequence with (P := aforall Inv).
-  apply Hoare_while.
-  apply Hoare_consequence_pre with (P := aforall (fun x => atrue b //\\ Inv x)).
-  apply IHc. intros x. apply H'.
-  intros s [A B] x; split; auto.
-  intros s A x. apply H'; auto.
-  intros s [A B] x. apply H'; split; auto.
-- intros.
-  set (REL := fun (x : X) (R: assertion) =>
-                (P x -->> atrue b //\\ R) /\ (atrue b //\\ R -->> Q x)).
-  assert (H': exists R: X -> assertion, forall x: X, REL x (R x)).
-  { apply CHOICE. intros x. apply Hoare_assert_inv. auto. }
-  destruct H' as (R & A).
-  eapply Hoare_consequence.
-  apply Hoare_assert with (P := aforall R).
-  intros s Pall; split.
-  destruct (A inhabited) as (B & C). apply B; auto.
-  intros x. destruct (A x) as (B & C). apply B; auto.
-  intros s (Bs & Rall) x. destruct (A x) as (B & C). apply C; split; auto.
-- assert (H': forall y, P y -->> aforall (fun n => aupdate x (CONST n) (Q y))).
-  { intros. apply Hoare_havoc_inv. auto. }
-  eapply Hoare_consequence_pre. apply Hoare_havoc.
-  intros s Pall n y. apply H'. auto.
+move=>CHOICE X inhabited; elim.
+- move=>?? H.
+  apply: Hoare_consequence_pre; first by exact: Hoare_skip.
+  by move=>???; apply: Hoare_skip_inv; first by apply: H.
+- move=>???? H.
+  apply: Hoare_consequence_pre; first by exact: Hoare_assign.
+  by move=>???; apply: Hoare_assign_inv; first by apply: H.
+- move=>c1 IH1 c2 IH2 P Q ?.
+  set (REL := fun (x : X) (R: assertion) => Hoare (P x) c1 R /\ Hoare R c2 (Q x)).
+  have [R H']: exists R: X -> assertion, forall x: X, REL x (R x)
+   by apply: CHOICE=>?; apply: Hoare_seq_inv.
+  by apply: (@Hoare_seq _ (aforall R)); [apply: IH1|apply: IH2]=>y; case: (H' y).
+- move=>b c1 IH1 c2 IH2 P Q H.
+  have H1: Hoare (aforall (fun x => atrue b //\\ P x)) c1 (aforall Q)
+    by apply: IH1=>y; case: (Hoare_ifthenelse_inv _ _ _ _ _ (H y)).
+  have H2: Hoare (aforall (fun x => afalse b //\\ P x)) c2 (aforall Q)
+    by apply: IH2=>y; case: (Hoare_ifthenelse_inv _ _ _ _ _ (H y)).
+  by apply: Hoare_ifthenelse; apply: Hoare_consequence_pre;
+  [apply: H1| |apply: H2|]=>?[??]?.
+- move=>b c IH P Q ?.
+  set REL := fun (x : X) (Inv: assertion) =>
+    Hoare (atrue b //\\ Inv) c Inv /\ (P x -->> Inv) /\ (afalse b //\\ Inv -->> Q x).
+  have [Inv H']: exists Inv: X -> assertion, forall x: X, REL x (Inv x)
+    by apply: CHOICE=>?; apply: Hoare_while_inv.
+  apply: (@Hoare_consequence (aforall Inv)).
+  - apply: Hoare_while.
+    apply: (@Hoare_consequence_pre (aforall (fun x => atrue b //\\ Inv x))).
+    - by apply: IH=>x; case: (H' x).
+    by move=>?[??]?.
+  - by move=>?? x; case: (H' x) =>_ [HP] _; apply: HP.
+  by move=>?[??]x; case: (H' x)=>_[_]; apply.
+- move=>b P Q ?.
+  set REL := fun (x : X) (R: assertion) =>
+                (P x -->> atrue b //\\ R) /\ (atrue b //\\ R -->> Q x).
+  have [R A]: exists R: X -> assertion, forall x: X, REL x (R x)
+    by apply: CHOICE=>?; apply: Hoare_assert_inv.
+  apply: Hoare_consequence; first by apply: (@Hoare_assert (aforall R)).
+  - move=>? Px; move: (A inhabited)=>[B ?]; case: (B _ (Px inhabited))=>??; split=>// x.
+    by move: (A x)=>[Bx ?]; case: (Bx _ (Px x)).
+  by move=>?[??]x; case: (A x)=>[_]; apply.
+- move=>??? H.
+  apply: Hoare_consequence_pre; first by exact: Hoare_havoc.
+  by move=>??? x; apply: Hoare_havoc_inv; first by exact: H.
 Qed.
 
 (** ** 2.4. Soundness *)
