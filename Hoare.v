@@ -508,41 +508,50 @@ Qed.
 Lemma Hoare_skip_inv: forall P Q,
   ⦃ P ⦄ SKIP ⦃ Q ⦄ -> (P -->> Q).
 Proof.
-move=>P Q H.
-elim: _ {-1}_ _ /H (erefl P) (erefl SKIP) (erefl Q)=>//.
-- by move=>? _ _ _.
-- move=>?????? IH H1 H2 _ ? _ ??.
-  by apply/H2/IH=>//; apply: H1.
+move=>?? H.
+elim: _ {-1}_ _ /H (erefl SKIP)=>//.
+- by move=>? _.
+- move=>?????? IH H1 H2 ???.
+  by apply/H2/IH/H1.
 Qed.
 
 Lemma Hoare_assign_inv: forall x a P Q,
   ⦃ P ⦄ ASSIGN x a ⦃ Q ⦄ -> (P -->> aupdate x a Q).
 Proof.
-  intros x a P Q H; dependent induction H.
-- red; auto.
-- red; intros; red. apply H1, IHHoare, H0; auto.
+move=>x a ?? H.
+elim: _ {-1}_ _ /H (erefl (ASSIGN x a))=>//.
+- by move=>???; case=>->->.
+- move=>?????? IH H1 H2 ???.
+  by apply/H2/IH/H1.
 Qed.
 
 Lemma Hoare_seq_inv: forall c1 c2 P Q,
-  ⦃ P ⦄ c1 ;; c2  ⦃ Q  ⦄ ->
+  ⦃ P ⦄ c1 ;; c2 ⦃ Q ⦄ ->
   exists R, ⦃ P ⦄ c1 ⦃ R ⦄ /\ ⦃ R ⦄ c2 ⦃ Q ⦄.
 Proof.
-  intros c1 c2 P Q H; dependent induction H.
-- exists Q; auto.
-- edestruct IHHoare as (R & C1 & C2); eauto.
-  exists R; split; eauto using Hoare_consequence_pre, Hoare_consequence_post.
+move=>c1 c2 ?? H.
+elim: _ {-1}_ _ /H (erefl (c1;; c2))=>//.
+- move=>? Q2 ???????; case=>->->.
+  by exists Q2.
+- move=>?????? IH H1 H2 ?; case: IH=>// R[C1]C2.
+  exists R; split.
+  - by apply/Hoare_consequence_pre/H1.
+  by apply/Hoare_consequence_post/H2.
 Qed.
 
 Lemma Hoare_ifthenelse_inv: forall b c1 c2 P Q,
   ⦃ P ⦄ IFTHENELSE b c1 c2 ⦃ Q ⦄ ->
   ⦃ atrue b //\\ P ⦄ c1 ⦃ Q ⦄ /\ ⦃ afalse b //\\ P ⦄ c2 ⦃ Q ⦄.
 Proof.
-  intros b c1 c2 P Q H; dependent induction H.
-- split; auto.
-- edestruct IHHoare as (C1 & C2); eauto.
-  split; eapply Hoare_consequence; eauto.
-  intros s [A B]; split; auto.
-  intros s [A B]; split; auto.
+move=>b c1 c2 ?? H.
+elim: _ {-1}_ _ /H (erefl (IFTHENELSE b c1 c2))=>//.
+- by move=>?????????; case=>->->->.
+- move=>?????? IH H1 H2 ?; case: IH=>// C1 C2.
+  split; apply/Hoare_consequence/H2.
+  - by exact: C1.
+  - by move=>?[?]?; split=>//; apply: H1.
+  - by exact: C2.
+  - by move=>?[?]?; split=>//; apply: H1.
 Qed.
 
 Lemma Hoare_while_inv: forall b c P Q,
@@ -550,28 +559,36 @@ Lemma Hoare_while_inv: forall b c P Q,
   exists Inv, ⦃ atrue b //\\ Inv ⦄ c ⦃ Inv ⦄
            /\ (P -->> Inv) /\ (afalse b //\\ Inv -->> Q).
 Proof.
-  intros b c P Q H; dependent induction H.
-- exists P; split; auto. split; Tauto.
-- edestruct IHHoare as (Inv & C & X & Y); eauto.
-  exists Inv; split; auto. split; Tauto.
+move=>b c ?? H.
+elim: _ {-1}_ _ /H (erefl (WHILE b c))=>//.
+- move=>R ????; case=>->->.
+  by exists R; do 2!split=>//.
+- move=>?????? IH H1 H2 ?.
+  case: IH=>// Inv [C][X]Y.
+  by exists Inv; split=>//; split=>?; [move/H1/X|move/Y/H2].
 Qed.
 
 Lemma Hoare_havoc_inv: forall x P Q,
   ⦃ P ⦄ HAVOC x ⦃ Q ⦄ -> (P -->> aforall (fun n => aupdate x (CONST n) Q)).
 Proof.
-  intros x P Q H; dependent induction H.
-- red; auto.
-- intros s Ps n. apply H1. apply IHHoare; auto.
+move=>x ?? H.
+elim: _ {-1}_ _ /H (erefl (HAVOC x))=>//.
+- by move=>??; case=>->.
+- move=>?????? IH H1 H2 ????.
+  by apply/H2/IH/H1.
 Qed.
 
 Lemma Hoare_assert_inv: forall b P Q,
   ⦃ P ⦄ ASSERT b ⦃ Q ⦄ ->
   exists R, (P -->> atrue b //\\ R) /\ (atrue b //\\ R -->> Q).
 Proof.
-  intros b P Q H; dependent induction H.
-- exists P; split; Tauto.
-- edestruct IHHoare as (R & A & B); eauto.
-  exists R; split; Tauto.
+move=>b ?? H.
+elim: _ {-1}_ _ /H (erefl (ASSERT b)) =>//.
+- move=>R ?; case=>->.
+  by exists R; split.
+- move=>?????? IH H1 H2 ?.
+  case: IH=>// R [A B].
+  by exists R; split=>?; [move/H1/A|move/B/H2].
 Qed.
 
 (** Some admissible rules. *)
@@ -581,33 +598,46 @@ Lemma Hoare_conj:
   ⦃ P1 ⦄ c ⦃ Q1 ⦄ -> ⦃ P2 ⦄ c ⦃ Q2 ⦄ ->
   ⦃ P1 //\\ P2 ⦄ c ⦃ Q1 //\\ Q2 ⦄.
 Proof.
-  induction c; intros.
-- apply Hoare_skip_inv in H. apply Hoare_skip_inv in H0.
-  eapply Hoare_consequence_post. apply Hoare_skip. Tauto.
-- apply Hoare_assign_inv in H. apply Hoare_assign_inv in H0.
-  eapply Hoare_consequence_pre. apply Hoare_assign. unfold aupdate in *; Tauto.
-- apply Hoare_seq_inv in H. destruct H as (R1 & C11 & C21).
-  apply Hoare_seq_inv in H0. destruct H0 as (R2 & C12 & C22).
-  apply Hoare_seq with (R1 //\\ R2); auto.
-- apply Hoare_ifthenelse_inv in H. destruct H as (C11 & C21).
-  apply Hoare_ifthenelse_inv in H0. destruct H0 as (C12 & C22).
-  apply Hoare_ifthenelse.
-  eapply Hoare_consequence_pre. eauto. Tauto.
-  eapply Hoare_consequence_pre. eauto. Tauto.
-- apply Hoare_while_inv in H. destruct H as (Inv1 & C1 & A1 & B1).
-  apply Hoare_while_inv in H0. destruct H0 as (Inv2 & C2 & A2 & B2).
-  eapply Hoare_consequence with (P := Inv1 //\\ Inv2).
-  apply Hoare_while.
-  eapply Hoare_consequence_pre. eapply IHc; eauto. Tauto.
-  Tauto. Tauto.
-- intros. apply Hoare_assert_inv in H. destruct H as (R1 & A1 & B1).
-  apply Hoare_assert_inv in H0. destruct H0 as (R2 & A2 & B2).
-  eapply Hoare_consequence. eapply Hoare_assert with (P := R1 //\\ R2).
-  Tauto. Tauto.
-- apply Hoare_havoc_inv in H.
-  apply Hoare_havoc_inv in H0.
-  eapply Hoare_consequence_pre. apply Hoare_havoc.
-  unfold aupdate, aforall in *; Tauto.
+elim.
+- move=>???? H1 H2.
+  move/Hoare_skip_inv: H1=>H1; move/Hoare_skip_inv: H2=>H2.
+  apply: Hoare_consequence_post; first by exact: Hoare_skip.
+  by move=>?[?]?; split; [apply:H1|apply:H2].
+- move=>?????? H1 H2.
+  move/Hoare_assign_inv: H1=>H1; move/Hoare_assign_inv: H2=>H2.
+  apply: Hoare_consequence_pre; first by exact: Hoare_assign.
+  by move=>?[?]?; split; [apply:H1|apply:H2].
+- move=>? IH1 ? IH2 ???? H1 H2.
+  move/Hoare_seq_inv: H1=>[R1 [??]].
+  move/Hoare_seq_inv: H2=>[R2 [??]].
+  by apply: (@Hoare_seq _ (R1 //\\ R2)); [apply: IH1| apply: IH2].
+- move=>?? IH1 ? IH2 ???? H1 H2.
+  move/Hoare_ifthenelse_inv: H1=>[C11 C21].
+  move/Hoare_ifthenelse_inv: H2=>[C12 C22].
+  apply: Hoare_ifthenelse; apply: Hoare_consequence_pre.
+  - by apply/IH1/C12/C11.
+  - by move=>?[?][?]?.
+  - by apply/IH2/C22/C21.
+  - by move=>?[?][?]?.
+- move=>?? IH ???? H1 H2.
+  move/Hoare_while_inv: H1=>[Inv1][C1][A1]B1.
+  move/Hoare_while_inv: H2=>[Inv2][C2][A2]B2.
+  apply: (@Hoare_consequence (Inv1 //\\ Inv2)).
+  - apply/Hoare_while/Hoare_consequence_pre.
+    - by apply/IH/C2/C1.
+    by move=>?[?][?]?.
+  - by move=>?[?]?; split; [apply:A1|apply:A2].
+  by move=>?[?][?]?; split; [apply:B1|apply:B2].
+- move=>????? H1 H2.
+  move/Hoare_assert_inv: H1=>[R1][A1]B1.
+  move/Hoare_assert_inv: H2=>[R2][A2]B2.
+  apply: Hoare_consequence; first by exact: (@Hoare_assert (R1 //\\ R2)).
+  - by move=>?[] /A1 [?]? /A2 [].
+  by move=>?[?][?]?; split; [apply:B1|apply:B2].
+move=>????? H1 H2.
+move/Hoare_havoc_inv: H1=>H1; move/Hoare_havoc_inv: H2=>H2.
+apply: Hoare_consequence_pre; first by exact: Hoare_havoc.
+by move=>?[?]?; rewrite /aforall /aupdate=>?; split; [apply: H1|apply: H2].
 Qed.
 
 Lemma Hoare_disj:
