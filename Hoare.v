@@ -1,16 +1,27 @@
 (** Hoare logic. *)
 
 From Coq Require Import ssreflect ssrfun ssrbool Lia Bool String List (*Program.Equality*).
-From mathcomp Require Import ssrint ssralg ssrnum eqtype zify.
+From mathcomp Require Import ssrint ssralg ssrnum eqtype order zify.
 From Coq Require Import FunctionalExtensionality.
 From CDF Require Import Sequences.
+Import Order.Theory.
 
 Local Open Scope string_scope.
 Local Open Scope ring_scope.
 Local Open Scope list_scope.
 
+(* TODO move to Util *)
 
-(* TODO move *)
+Theorem well_founded_lt : well_founded (fun n m : int => 0 <= n < m).
+Proof.
+  move => x.
+  move: {2}x (lexx x) => n.
+  elim: n x => [| n IHn| n IHn] x H; constructor => y H0.
+  - by apply False_ind; lia.
+  - by apply IHn; lia.
+  - by apply IHn; lia.
+Defined.
+
 Definition eq_string (a b : string) : bool :=
   match string_dec a b with left _ => true| right _ => false end.
 
@@ -173,7 +184,7 @@ Fixpoint error (c: com) (s: store) : Prop :=
   | _ => False
   end.
 
-Definition terminated (c: com) : Prop :=  c = SKIP.
+Definition terminated (c: com) : Prop := c = SKIP.
 
 Definition terminates (c: com) (s s': store) : Prop :=
   exists c', star red (c, s) (c', s') /\ terminated c'.
@@ -757,7 +768,7 @@ move=>CHOICE X inhabited; elim.
   apply: Hoare_consequence_pre; first by exact: Hoare_assign.
   by move=>???; apply: Hoare_assign_inv; first by apply: H.
 - move=>c1 IH1 c2 IH2 P Q ?.
-  set (REL := fun (x : X) (R: assertion) => Hoare (P x) c1 R /\ Hoare R c2 (Q x)).
+  set REL := fun (x : X) (R: assertion) => Hoare (P x) c1 R /\ Hoare R c2 (Q x).
   have [R H']: exists R: X -> assertion, forall x: X, REL x (R x)
    by apply: CHOICE=>?; apply: Hoare_seq_inv.
   by apply: (@Hoare_seq _ (aforall R)); [apply: IH1|apply: IH2]=>y; case: (H' y).
@@ -791,7 +802,7 @@ move=>CHOICE X inhabited; elim.
   by move=>?[??]x; case: (A x)=>[_]; apply.
 - move=>??? H.
   apply: Hoare_consequence_pre; first by exact: Hoare_havoc.
-  by move=>??? x; apply: Hoare_havoc_inv; first by exact: H.
+  by move=>????; apply: Hoare_havoc_inv; first by exact: H.
 Qed.
 
 (** ** 2.4. Soundness *)
@@ -803,9 +814,11 @@ Module Soundness1.
 Lemma Hoare_safe:
   forall P c Q,
   ⦃ P ⦄ c ⦃ Q ⦄ ->
-  forall s, P s -> ~(error c s).
+  forall s, P s -> ~error c s.
 Proof.
-  induction 1; intros s Ps; simpl; auto. destruct Ps. red in H. congruence.
+move=>???; elim=>//=; try by move=>*.
+- by move=>??? [A ?] H; rewrite A in H.
+- by move=>?????? H HP ??? HE; apply/H/HE/HP.
 Qed.
 
 Lemma Hoare_step:
@@ -814,28 +827,44 @@ Lemma Hoare_step:
   forall s c' s',
   P s -> red (c, s) (c', s') -> exists P', ⦃ P' ⦄ c' ⦃ Q ⦄ /\ P' s'.
 Proof.
-  induction 1; intros s c' s' Ps RED.
-- inv RED.
-- inv RED.
-  exists P; split. constructor. exact Ps.
-- inv RED.
-  + exists Q; split. assumption. eapply Hoare_skip_inv; eauto.
-  + destruct (IHHoare1 _ _ _ Ps H2) as (P' & HO' & Ps').
-    exists P'; split; auto. apply Hoare_seq with Q; auto.
-- inv RED.
-  exists (if beval b s' then atrue b //\\ P else afalse b //\\ P); split.
-  destruct (beval b s'); auto.
-  unfold aand, atrue, afalse. destruct (beval b s') eqn:B; auto.
-- inv RED.
-  + exists (afalse b //\\ P); split. constructor. unfold aand, afalse; auto.
-  + exists (atrue b //\\ P); split.
-    apply Hoare_seq with P; auto. apply Hoare_while; auto.
-    unfold aand, atrue; auto.
-- inv RED. exists Q; split. constructor. apply Ps.
-- destruct Ps as [Ps1 Ps2]. inv RED.
-  exists (atrue b //\\ P); split. constructor. split; auto.
-- apply H0 in Ps. destruct (IHHoare _ _ _ Ps RED) as (R & HO & Rs').
-  exists R; split; auto. apply Hoare_consequence_post with Q; auto.
+move=>???; elim.
+- move=>? s c' s' ? R.
+  by case: {-1}_ {-1}_ / R (erefl (SKIP, s)) (erefl (c', s')).
+- move=>P x a s c' s' ? R.
+  case: {-1}_ {-1}_ / R (erefl (ASSIGN x a, s)) (erefl (c', s'))=>// ???; case=><-<-<-; case=>->->.
+  by exists P; split=>//; exact: Hoare_skip.
+- move=>? Q ? c1 c2 H IH1 ?? s c' s' Ps R.
+  case: {-1}_ {-1}_ / R (erefl (c1;; c2, s)) (erefl (c', s'))=>//.
+  - move=>??; case=>EC <-<-; case=>->->; rewrite {}EC in H.
+    exists Q; split=>//.
+    by apply: Hoare_skip_inv; first by exact: H.
+  - move=>????? R; case=>E1 E2 ES; case=>->->; rewrite -{}E1 -{}E2 -{}ES in R *.
+    move: (IH1 _ _ _ Ps R)=>[P'][HO' Ps'].
+    by exists P'; split=>//; apply: Hoare_seq; first by exact: HO'.
+- move=>P ? b c1 c2 ???? s c' s' ? R.
+  case: {-1}_ {-1}_ / R (erefl (IFTHENELSE b c1 c2, s)) (erefl (c', s'))=>// ????.
+  case=><-<-<-<-; case=>->->.
+  exists (if beval b s then atrue b //\\ P else afalse b //\\ P).
+  by split; case/boolP: (beval _ _).
+- move=>P b c1 H ? s c' s' ? R.
+  case: {-1}_ {-1}_ / R (erefl (WHILE b c1, s)) (erefl (c', s'))=>// ??? HB.
+  - case=>EB _ ES; case=>->->; rewrite -{}EB -{}ES in HB *.
+    by exists (afalse b //\\ P); split=>//; exact: Hoare_skip.
+  - case=>EB EC ES; case=>->->; rewrite -{}EB -{}EC -{}ES in HB *.
+  exists (atrue b //\\ P); split=>//; apply: Hoare_seq; first by exact: H.
+  by apply: Hoare_while.
+- move=>x Q s c' s' H R.
+  case: {-1}_ {-1}_ / R (erefl (HAVOC x, s)) (erefl (c', s'))=>// ???.
+  case=><-<-; case=>->->.
+  by exists Q; split; [exact: Hoare_skip | apply: H].
+- move=>P b s c' s' [??] R.
+  case: {-1}_ {-1}_ / R (erefl (ASSERT b, s)) (erefl (c', s'))=>// ?? HB.
+  case=>EB ES; case=>->->; rewrite -{}EB -{}ES in HB *.
+  by exists (atrue b //\\ P); split=>//; exact: Hoare_skip.
+- move=>?????? IH H1 ???? Ps R.
+  move/H1: Ps=>Ps; case: (IH _ _ _ Ps R)=>R' [H0 ?].
+  exists R'; split=>//.
+  by apply: Hoare_consequence_post; first by exact H0.
 Qed.
 
 Corollary Hoare_steps:
@@ -843,16 +872,15 @@ Corollary Hoare_steps:
   ⦃ P ⦄ c ⦃ Q ⦄ -> P s -> star red (c, s) (c', s') ->
   exists P', ⦃ P' ⦄ c' ⦃ Q ⦄ /\ P' s'.
 Proof.
-  assert (REC: forall cs cs', star red cs cs' ->
-               forall P Q, Hoare P (fst cs) Q -> P (snd cs) ->
-               exists P', Hoare P' (fst cs') Q /\ P' (snd cs')).
-  { induction 1; intros.
-  - exists P; auto.
-  - destruct a as [c1 s1], b as [c2 s2], c as [c3 s3]; simpl in *.
-    destruct (Hoare_step _ _ _ H1 _ _ _ H2 H) as (R & HO & Rs2).
-    eapply IHstar; eauto.
-  }
-  intros. eapply (REC (c, s) (c', s')); eauto.
+have REC: forall cs cs', star red cs cs' ->
+          forall P Q, Hoare P cs.1 Q -> P cs.2 ->
+          exists P', Hoare P' cs'.1 Q /\ P' cs'.2.
+- move=>??; elim.
+  - by move=>? P ???; exists P.
+  - move=>[??][??][??] R ? /= IH ?? H1 H2.
+    case: (Hoare_step _ _ _ H1 _ _ _ H2 R)=>? [HO ?].
+    by apply: IH; first by exact: HO.
+by move=>?? c s c' s' H ??; apply: (REC (c,s) (c',s'))=>//; first by exact: H.
 Qed.
 
 Corollary Hoare_sound:
@@ -860,13 +888,13 @@ Corollary Hoare_sound:
   ⦃ P ⦄ c ⦃ Q ⦄ -> P s ->
   ~ goeswrong c s /\ (forall s', terminates c s s' -> Q s').
 Proof.
-  intros P c Q s HO Ps; split.
-- intros (c' & s' & RED & STUCK).
-  destruct (Hoare_steps _ _ _ _ _ _ HO Ps RED) as (P' & HO' & Ps').
-  eapply Hoare_safe; eauto.
-- intros s' (c' & RED & TERM). red in TERM. subst c'.
-  destruct (Hoare_steps _ _ _ _ _ _ HO Ps RED) as (P' & HO' & Ps').
-  eapply Hoare_skip_inv; eauto.
+move=>???? HO Ps; split.
+- move=>[?][?][RED STUCK].
+  case: (Hoare_steps _ _ _ _ _ _ HO Ps RED)=>? [HO' Ps'].
+  by apply: Hoare_safe; [exact: HO'| exact: Ps'|].
+- move=>?[?][RED TERM]; rewrite TERM in RED.
+  case: (Hoare_steps _ _ _ _ _ _ HO Ps RED)=>? [HO' Ps'].
+  by apply: Hoare_skip_inv; first by exact: HO'.
 Qed.
 
 End Soundness1.
@@ -892,16 +920,16 @@ Notation "〚〚 P 〛〛 c 〚〚 Q 〛〛" := (Triple P c Q) (at level 90, c a
 Lemma Triple_skip: forall P,
       〚〚 P 〛〛 SKIP 〚〚 P 〛〛.
 Proof.
-  intros P s PRE. apply safe_now. reflexivity. auto.
+by move=>???; apply: safe_now.
 Qed.
 
 Lemma Triple_assign: forall P x a,
       〚〚 aupdate x a P 〛〛 ASSIGN x a 〚〚 P 〛〛.
 Proof.
-  intros P x a s PRE. apply safe_step.
-- unfold terminated; congruence.
-- cbn; tauto.
-- intros c' s' RED; inv RED. apply safe_now. reflexivity. exact PRE.
+move=>? x a s ?; apply: safe_step=>// c' s' R.
+case: {-1}_ {-1}_ / R (erefl (ASSIGN x a, s)) (erefl (c', s'))=>// ???.
+case=><-<-<-; case=>->->.
+by apply: safe_now.
 Qed.
 
 Remark safe_seq:
@@ -909,21 +937,26 @@ Remark safe_seq:
   (forall s, Q s -> safe R c' s) ->
   forall c s, safe Q c s -> safe R (c ;; c') s.
 Proof.
-  intros Q R c2 QR. induction 1.
-  - rewrite H. apply safe_step. unfold terminated; congruence. cbn; auto.
-    intros c' s' RED; inv RED. apply QR; auto.
-    inv H2.
-  - apply safe_step. unfold terminated; congruence. cbn; auto.
-    intros c' s' RED; inv RED.
-    + elim H; red; auto.
-    + apply H2; auto.
+move=>?? c H ??; elim=>c0 s.
+- move=>-> ?; apply: safe_step=>// c' s' R.
+  case: {-1}_ {-1}_ / R (erefl (SKIP;; c, s)) (erefl (c', s'))=>//.
+  - move=>??; case=><-<-; case=>->->.
+    by apply: H.
+  - move=>??? c2 s2 R; case=>E2 <- E1; case=>->->; rewrite -{}E1 -{}E2 in R.
+    by case: {-1}_ {-1}_ / R (erefl (SKIP, s)) (erefl (c2, s2)).
+move=>HT ?? H2; apply: safe_step=>// c' s' R.
+case: {-1}_ {-1}_ / R (erefl (c0;; c, s)) (erefl (c', s'))=>//.
+- by move=>??; case=>E0; rewrite E0 /terminated in HT.
+- move=>????? R; case=>EC <- ES; case=>->->; rewrite -{}EC -{}ES in R.
+  by apply: H2.
 Qed.
 
 Lemma Triple_seq: forall P Q R c1 c2,
       〚〚 P 〛〛 c1 〚〚 Q 〛〛 -> 〚〚 Q 〛〛 c2 〚〚 R 〛〛 ->
       〚〚 P 〛〛 c1;;c2 〚〚 R 〛〛.
 Proof.
-  intros. intros s PRE. apply safe_seq with Q; auto.
+move=>????? H H2 ??; apply: safe_seq; first by exact: H2.
+by apply: H.
 Qed.
 
 Lemma Triple_ifthenelse: forall P Q b c1 c2,
@@ -931,11 +964,10 @@ Lemma Triple_ifthenelse: forall P Q b c1 c2,
       〚〚 afalse b //\\ P 〛〛 c2 〚〚 Q 〛〛 ->
       〚〚 P 〛〛 IFTHENELSE b c1 c2 〚〚 Q 〛〛.
 Proof.
-  intros; intros s PRE. apply safe_step. unfold terminated; congruence. cbn; auto.
-  intros c' s' RED; inv RED.
-  destruct (beval b s') eqn:B.
-- apply H; split; auto.
-- apply H0; split; auto.
+move=>?? b c1 c2 H1 H2 s ?; apply: safe_step=>// c' s' R.
+case: {-1}_ {-1}_ / R (erefl (IFTHENELSE b c1 c2, s)) (erefl (c', s'))=>// ????.
+case=><-<-<-<-; case=>->->.
+by case/boolP: (beval _ _)=>?; [apply: H1 | apply: H2].
 Qed.
 
 Lemma Triple_while: forall P variant b c,
@@ -946,60 +978,65 @@ Lemma Triple_while: forall P variant b c,
   ->
      〚〚 P 〛〛 WHILE b c 〚〚 afalse b //\\ P 〛〛.
 Proof.
-  intros P variant b c T.
-  assert (REC: forall v s, P s -> aeval variant s = v ->
-               safe (afalse b //\\ P) (WHILE b c) s ).
-  { induction v using (well_founded_induction (int.lt_wf 0)).
-    intros. apply safe_step. unfold terminated; congruence. cbn; auto.
-    intros c' s' RED; inv RED.
-  - apply safe_now. red; auto. split; auto.
-  - apply safe_seq with (alessthan variant (aeval variant s') //\\ P).
-    + intros s'' [PRE1 PRE2]. red in PRE1. eapply H. eexact PRE1. exact PRE2. auto.
-    + apply T. split; auto. split; auto. red. auto.
-  }
-  intros s PRE. apply REC with (aeval variant s); auto.
+move=>P var b c H.
+have REC: forall v s, P s -> aeval var s = v ->
+          safe (afalse b //\\ P) (WHILE b c) s.
+- apply: well_founded_induction; first by exact: well_founded_lt.
+  move=>? /= IH s ? HA; apply: safe_step=>// c' s' R.
+  case: {-1}_ {-1}_ / R (erefl (WHILE b c, s)) (erefl (c', s'))=>// ??? HB.
+  - case=>EB _ ES; case=>->->; rewrite -{}EB -{}ES in HB *.
+    by apply: safe_now.
+  - case=>EB EC ES; case=>->->; rewrite -{}EB -{}EC -{}ES in HB *.
+    apply: (@safe_seq (alessthan var (aeval var s) //\\ P)).
+    - move=>? [P1 ?]; apply: IH=>//.
+      by rewrite /alessthan HA in P1.
+    by apply: H.
+by move=>s ?; apply: REC.
 Qed.
 
 Lemma Triple_havoc: forall x Q,
       〚〚 aforall (fun n => aupdate x (CONST n) Q) 〛〛 HAVOC x 〚〚 Q 〛〛.
 Proof.
-  intros; intros s PRE. apply safe_step. unfold terminated; congruence. cbn; auto.
-  intros c' s' RED; inv RED. constructor. red; auto. apply PRE.
+move=>x ? s H; apply: safe_step=>// c' s' R.
+case: {-1}_ {-1}_ / R (erefl (HAVOC x, s)) (erefl (c', s'))=>// ???.
+case=><-<-; case=>->->.
+by apply: safe_now=>//; apply: H.
 Qed.
 
 Lemma Triple_assert: forall b P,
       〚〚 atrue b //\\ P 〛〛 ASSERT b 〚〚 atrue b //\\ P 〛〛.
 Proof.
-  intros. intros s [PRE1 PRE2]. red in PRE1.
-  apply safe_step. unfold terminated; congruence. cbn; congruence.
-  intros c' s' RED; inv RED. apply safe_now; auto. red; auto. split; auto.
+move=>b ? s [HA ?]; apply: safe_step=>//=; first by rewrite HA.
+move=>c' s' R.
+case: {-1}_ {-1}_ / R (erefl (ASSERT b, s)) (erefl (c', s'))=>// ?? HB.
+case=>EB ES; case=>->->; rewrite -{}EB -{}ES in HB *.
+by apply: safe_now.
 Qed.
 
 Lemma Triple_consequence: forall P Q P' Q' c,
       〚〚 P 〛〛 c 〚〚 Q 〛〛 -> P' -->> P -> Q -->> Q' ->
       〚〚 P' 〛〛 c 〚〚 Q' 〛〛.
 Proof.
-  intros.
-  assert (REC: forall c s, safe Q c s -> safe Q' c s).
-  { induction 1.
-  - apply safe_now; auto.
-  - apply safe_step; auto.
-  }
-  red; auto.
+move=>? Q ? Q' ? H H1 H2 ??.
+have REC: forall c s, safe Q c s -> safe Q' c s.
+- move=>??; elim=>*.
+  - by apply: safe_now=>//; apply: H2.
+  - by apply: safe_step.
+by apply/REC/H/H1.
 Qed.
 
 Theorem HOARE_sound:
   forall P c Q, 〚 P 〛 c 〚 Q 〛 -> 〚〚 P 〛〛 c 〚〚 Q 〛〛.
 Proof.
-  induction 1.
-- apply Triple_skip.
-- apply Triple_assign.
-- apply Triple_seq with Q; auto.
-- apply Triple_ifthenelse; auto.
-- apply Triple_while with a; auto.
-- apply Triple_havoc; auto.
-- apply Triple_assert; auto.
-- apply Triple_consequence with P Q; auto.
+move=>???; elim.
+- by apply: Triple_skip.
+- by apply: Triple_assign.
+- by move=>?????? H ??; apply: Triple_seq; first by exact: H.
+- by move=>*; apply: Triple_ifthenelse.
+- by move=>*; apply: Triple_while.
+- by apply: Triple_havoc.
+- by move=>*; apply: Triple_assert.
+- by move=>?????? H ??; apply: Triple_consequence; first by exact: H.
 Qed.
 
 End Soundness2.
