@@ -12,7 +12,7 @@ Local Open Scope list_scope.
 
 (* TODO move to Util *)
 
-Theorem well_founded_lt : well_founded (fun n m : int => 0 <= n < m).
+Theorem well_founded_rlt : well_founded (fun n m : int => 0 <= n < m).
 Proof.
   move => x.
   move: {2}x (lexx x) => n.
@@ -981,7 +981,7 @@ Proof.
 move=>P var b c H.
 have REC: forall v s, P s -> aeval var s = v ->
           safe (afalse b //\\ P) (WHILE b c) s.
-- apply: well_founded_induction; first by exact: well_founded_lt.
+- apply: well_founded_induction; first by exact: well_founded_rlt.
   move=>? /= IH s ? HA; apply: safe_step=>// c' s' R.
   case: {-1}_ {-1}_ / R (erefl (WHILE b c, s)) (erefl (c', s'))=>// ??? HB.
   - case=>EB _ ES; case=>->->; rewrite -{}EB -{}ES in HB *.
@@ -1057,19 +1057,29 @@ CoInductive safe (Q: assertion): com -> store -> Prop :=
 Lemma safe_terminated_inv: forall Q c s,
   safe Q c s -> terminated c -> Q s.
 Proof.
-  intros. inv H. auto. contradiction.
+move=>? c ? H T.
+case: {-2}_ _ / H (erefl c)=>// ?? NT ?? EC.
+by rewrite EC T /terminated in NT.
 Qed.
 
 Lemma safe_not_stuck: forall Q c s,
-  safe Q c s -> ~terminated c -> ~(error c s).
+  safe Q c s -> ~terminated c -> ~error c s.
 Proof.
-  intros. inv H. contradiction. auto.
+move=>? c ? H NT.
+case: {-2}_ _ / H (erefl c)=>// ?? T ? EC.
+by rewrite EC in T; rewrite T /terminated in NT.
 Qed.
 
 Lemma safe_step_inv: forall Q c s c' s',
   safe Q c s -> red (c, s) (c', s') -> safe Q c' s'.
 Proof.
-  intros. inv H. red in H1; subst c; inv H0. eauto.
+move=>? c s ?? H R.
+case: {-2}_ {-2}_ / H (erefl c) (erefl s)=> ??.
+- move=>T ? EC _; rewrite {}EC /terminated in T.
+  rewrite {}T in R.
+  by case: {-1}_ _ / R (erefl (SKIP, s)).
+move=>?? S EC ES.
+by apply: S; rewrite EC ES.
 Qed.
 
 Definition triple (P: assertion) (c: com) (Q: assertion) : Prop :=
@@ -1080,16 +1090,16 @@ Notation "⦃⦃ P ⦄⦄ c ⦃⦃ Q ⦄⦄" := (triple P c Q) (at level 90, c a
 Lemma triple_skip: forall P,
       ⦃⦃ P ⦄⦄ SKIP ⦃⦃ P ⦄⦄.
 Proof.
-  intros P s PRE. apply safe_now. reflexivity. auto.
+by move=>???; apply: safe_now.
 Qed.
 
 Lemma triple_assign: forall P x a,
       ⦃⦃ aupdate x a P ⦄⦄ ASSIGN x a ⦃⦃ P ⦄⦄.
 Proof.
-  intros P x a s PRE. apply safe_step.
-- unfold terminated; congruence.
-- cbn; tauto.
-- intros c' s' RED; inv RED. apply safe_now. reflexivity. exact PRE.
+move=>? x a s ?; apply: safe_step=>// c' s' R.
+case: {-1}_ {-1}_ / R (erefl (ASSIGN x a, s)) (erefl (c', s'))=>// ???.
+case=><-<-<-; case=>->->.
+by apply: safe_now.
 Qed.
 
 Remark safe_seq:
