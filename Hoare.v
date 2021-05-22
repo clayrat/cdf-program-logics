@@ -3,6 +3,7 @@
 From Coq Require Import ssreflect ssrfun ssrbool Lia Bool String List (*Program.Equality*).
 From mathcomp Require Import ssrint ssralg ssrnum eqtype order zify.
 From Coq Require Import FunctionalExtensionality.
+From Paco Require Import paco.
 From CDF Require Import Sequences.
 Import Order.Theory.
 
@@ -829,37 +830,37 @@ Lemma Hoare_step:
 Proof.
 move=>???; elim.
 - move=>? s c' s' ? R.
-  by case: {-1}_ {-1}_ / R (erefl (SKIP, s)) (erefl (c', s')).
+  by case: {-2}_ {-1}_ / R (erefl (SKIP, s)) (erefl (c', s')).
 - move=>P x a s c' s' ? R.
-  case: {-1}_ {-1}_ / R (erefl (ASSIGN x a, s)) (erefl (c', s'))=>// ???; case=><-<-<-; case=>->->.
+  case: {-2}_ {-1}_ / R (erefl (ASSIGN x a, s)) (erefl (c', s'))=>// ???; case=>->->->; case=>->->.
   by exists P; split=>//; exact: Hoare_skip.
 - move=>? Q ? c1 c2 H IH1 ?? s c' s' Ps R.
-  case: {-1}_ {-1}_ / R (erefl (c1;; c2, s)) (erefl (c', s'))=>//.
-  - move=>??; case=>EC <-<-; case=>->->; rewrite {}EC in H.
+  case: {-2}_ {-1}_ / R (erefl (c1;; c2, s)) (erefl (c', s'))=>//.
+  - move=>??; case=>EC ->->; case=>->->; rewrite -{}EC in H.
     exists Q; split=>//.
     by apply: Hoare_skip_inv; first by exact: H.
-  - move=>????? R; case=>E1 E2 ES; case=>->->; rewrite -{}E1 -{}E2 -{}ES in R *.
+  - move=>????? R; case=>E1 E2 ES; case=>->->; rewrite {}E1 {}E2 {}ES in R *.
     move: (IH1 _ _ _ Ps R)=>[P'][HO' Ps'].
     by exists P'; split=>//; apply: Hoare_seq; first by exact: HO'.
 - move=>P ? b c1 c2 ???? s c' s' ? R.
-  case: {-1}_ {-1}_ / R (erefl (IFTHENELSE b c1 c2, s)) (erefl (c', s'))=>// ????.
-  case=><-<-<-<-; case=>->->.
+  case: {-2}_ {-1}_ / R (erefl (IFTHENELSE b c1 c2, s)) (erefl (c', s'))=>// ????.
+  case=>->->->->; case=>->->.
   exists (if beval b s then atrue b //\\ P else afalse b //\\ P).
   by split; case/boolP: (beval _ _).
 - move=>P b c1 H ? s c' s' ? R.
-  case: {-1}_ {-1}_ / R (erefl (WHILE b c1, s)) (erefl (c', s'))=>// ??? HB.
-  - case=>EB _ ES; case=>->->; rewrite -{}EB -{}ES in HB *.
+  case: {-2}_ {-1}_ / R (erefl (WHILE b c1, s)) (erefl (c', s'))=>// ??? HB.
+  - case=>EB _ ES; case=>->->; rewrite {}EB {}ES in HB *.
     by exists (afalse b //\\ P); split=>//; exact: Hoare_skip.
-  - case=>EB EC ES; case=>->->; rewrite -{}EB -{}EC -{}ES in HB *.
+  - case=>EB -> ES; case=>->->; rewrite {}EB {}ES in HB *.
   exists (atrue b //\\ P); split=>//; apply: Hoare_seq; first by exact: H.
   by apply: Hoare_while.
 - move=>x Q s c' s' H R.
-  case: {-1}_ {-1}_ / R (erefl (HAVOC x, s)) (erefl (c', s'))=>// ???.
-  case=><-<-; case=>->->.
+  case: {-2}_ {-1}_ / R (erefl (HAVOC x, s)) (erefl (c', s'))=>// ???.
+  case=>->->; case=>->->.
   by exists Q; split; [exact: Hoare_skip | apply: H].
 - move=>P b s c' s' [??] R.
-  case: {-1}_ {-1}_ / R (erefl (ASSERT b, s)) (erefl (c', s'))=>// ?? HB.
-  case=>EB ES; case=>->->; rewrite -{}EB -{}ES in HB *.
+  case: {-2}_ {-1}_ / R (erefl (ASSERT b, s)) (erefl (c', s'))=>// ?? HB.
+  case=>EB ES; case=>->->; rewrite {}EB {}ES in HB *.
   by exists (atrue b //\\ P); split=>//; exact: Hoare_skip.
 - move=>?????? IH H1 ???? Ps R.
   move/H1: Ps=>Ps; case: (IH _ _ _ Ps R)=>R' [H0 ?].
@@ -927,8 +928,8 @@ Lemma Triple_assign: forall P x a,
       〚〚 aupdate x a P 〛〛 ASSIGN x a 〚〚 P 〛〛.
 Proof.
 move=>? x a s ?; apply: safe_step=>// c' s' R.
-case: {-1}_ {-1}_ / R (erefl (ASSIGN x a, s)) (erefl (c', s'))=>// ???.
-case=><-<-<-; case=>->->.
+case: {-2}_ {-1}_ / R (erefl (ASSIGN x a, s)) (erefl (c', s'))=>// ???.
+case=>->->->; case=>->->.
 by apply: safe_now.
 Qed.
 
@@ -939,11 +940,11 @@ Remark safe_seq:
 Proof.
 move=>?? c H ??; elim=>c0 s.
 - move=>-> ?; apply: safe_step=>// c' s' R.
-  case: {-1}_ {-1}_ / R (erefl (SKIP;; c, s)) (erefl (c', s'))=>//.
-  - move=>??; case=><-<-; case=>->->.
+  case: {-2}_ {-1}_ / R (erefl (SKIP;; c, s)) (erefl (c', s'))=>//.
+  - move=>??; case=>->->; case=>->->.
     by apply: H.
-  - move=>??? c2 s2 R; case=>E2 <- E1; case=>->->; rewrite -{}E1 -{}E2 in R.
-    by case: {-1}_ {-1}_ / R (erefl (SKIP, s)) (erefl (c2, s2)).
+  - move=>??? c2 s2 R; case=>E2 -> E1; case=>->->; rewrite {}E1 {}E2 in R.
+    by case: {-2}_ {-1}_ / R (erefl (SKIP, s)) (erefl (c2, s2)).
 move=>HT ?? H2; apply: safe_step=>// c' s' R.
 case: {-1}_ {-1}_ / R (erefl (c0;; c, s)) (erefl (c', s'))=>//.
 - by move=>??; case=>E0; rewrite E0 /terminated in HT.
@@ -965,8 +966,8 @@ Lemma Triple_ifthenelse: forall P Q b c1 c2,
       〚〚 P 〛〛 IFTHENELSE b c1 c2 〚〚 Q 〛〛.
 Proof.
 move=>?? b c1 c2 H1 H2 s ?; apply: safe_step=>// c' s' R.
-case: {-1}_ {-1}_ / R (erefl (IFTHENELSE b c1 c2, s)) (erefl (c', s'))=>// ????.
-case=><-<-<-<-; case=>->->.
+case: {-2}_ {-1}_ / R (erefl (IFTHENELSE b c1 c2, s)) (erefl (c', s'))=>// ????.
+case=>->->->->; case=>->->.
 by case/boolP: (beval _ _)=>?; [apply: H1 | apply: H2].
 Qed.
 
@@ -983,10 +984,10 @@ have REC: forall v s, P s -> aeval var s = v ->
           safe (afalse b //\\ P) (WHILE b c) s.
 - apply: well_founded_induction; first by exact: well_founded_rlt.
   move=>? /= IH s ? HA; apply: safe_step=>// c' s' R.
-  case: {-1}_ {-1}_ / R (erefl (WHILE b c, s)) (erefl (c', s'))=>// ??? HB.
-  - case=>EB _ ES; case=>->->; rewrite -{}EB -{}ES in HB *.
+  case: {-2}_ {-1}_ / R (erefl (WHILE b c, s)) (erefl (c', s'))=>// ??? HB.
+  - case=>EB _ ES; case=>->->; rewrite {}EB {}ES in HB *.
     by apply: safe_now.
-  - case=>EB EC ES; case=>->->; rewrite -{}EB -{}EC -{}ES in HB *.
+  - case=>EB -> ES; case=>->->; rewrite {}EB {}ES in HB *.
     apply: (@safe_seq (alessthan var (aeval var s) //\\ P)).
     - move=>? [P1 ?]; apply: IH=>//.
       by rewrite /alessthan HA in P1.
@@ -998,8 +999,8 @@ Lemma Triple_havoc: forall x Q,
       〚〚 aforall (fun n => aupdate x (CONST n) Q) 〛〛 HAVOC x 〚〚 Q 〛〛.
 Proof.
 move=>x ? s H; apply: safe_step=>// c' s' R.
-case: {-1}_ {-1}_ / R (erefl (HAVOC x, s)) (erefl (c', s'))=>// ???.
-case=><-<-; case=>->->.
+case: {-2}_ {-1}_ / R (erefl (HAVOC x, s)) (erefl (c', s'))=>// ???.
+case=>->->; case=>->->.
 by apply: safe_now=>//; apply: H.
 Qed.
 
@@ -1008,8 +1009,8 @@ Lemma Triple_assert: forall b P,
 Proof.
 move=>b ? s [HA ?]; apply: safe_step=>//=; first by rewrite HA.
 move=>c' s' R.
-case: {-1}_ {-1}_ / R (erefl (ASSERT b, s)) (erefl (c', s'))=>// ?? HB.
-case=>EB ES; case=>->->; rewrite -{}EB -{}ES in HB *.
+case: {-2}_ {-1}_ / R (erefl (ASSERT b, s)) (erefl (c', s'))=>// ?? HB.
+case=>EB ES; case=>->->; rewrite {}EB {}ES in HB *.
 by apply: safe_now.
 Qed.
 
@@ -1045,19 +1046,34 @@ End Soundness2.
 
 Module Soundness3.
 
-CoInductive safe (Q: assertion): com -> store -> Prop :=
-  | safe_now: forall c s,
-      terminated c -> Q s ->
-      safe Q c s
-  | safe_step: forall c s,
-      ~terminated c -> ~error c s ->
-      (forall c' s', red (c, s) (c', s') -> safe Q c' s') ->
-      safe Q c s.
+Inductive safe_gen (Q : assertion) (safe : com -> store -> Prop) : com -> store -> Prop :=
+| safe_now: forall c s, terminated c -> Q s -> safe_gen Q safe c s
+| safe_step: forall c s, ~terminated c -> ~error c s ->
+                        (forall c' s', red (c, s) (c', s') -> safe c' s') ->
+                        safe_gen Q safe c s.
+
+#[export] Hint Constructors safe_gen : core.
+
+Lemma safe_gen_mono Q : monotone2 (safe_gen Q).
+Proof.
+by pmonauto.
+(*
+rewrite /monotone2 =>???? IN LE.
+elim: IN=>??.
+- by move=>??; apply: safe_now.
+- by move=>?? H; apply: safe_step=>// ???; by apply/LE/H.
+*)
+Qed.
+
+#[export] Hint Resolve safe_gen_mono : paco.
+
+Definition safe Q c s := paco2 (safe_gen Q) bot2 c s.
+#[export] Hint Unfold seq : core.
 
 Lemma safe_terminated_inv: forall Q c s,
   safe Q c s -> terminated c -> Q s.
 Proof.
-move=>? c ? H T.
+move=>? c ? H T; punfold H.
 case: {-2}_ _ / H (erefl c)=>// ?? NT ?? EC.
 by rewrite EC T /terminated in NT.
 Qed.
@@ -1065,7 +1081,7 @@ Qed.
 Lemma safe_not_stuck: forall Q c s,
   safe Q c s -> ~terminated c -> ~error c s.
 Proof.
-move=>? c ? H NT.
+move=>? c ? H NT; punfold H.
 case: {-2}_ _ / H (erefl c)=>// ?? T ? EC.
 by rewrite EC in T; rewrite T /terminated in NT.
 Qed.
@@ -1073,13 +1089,13 @@ Qed.
 Lemma safe_step_inv: forall Q c s c' s',
   safe Q c s -> red (c, s) (c', s') -> safe Q c' s'.
 Proof.
-move=>? c s ?? H R.
+move=>? c s ?? H R; punfold H.
 case: {-2}_ {-2}_ / H (erefl c) (erefl s)=> ??.
 - move=>T ? EC _; rewrite {}EC /terminated in T.
   rewrite {}T in R.
   by case: {-1}_ _ / R (erefl (SKIP, s)).
-move=>?? S EC ES.
-by apply: S; rewrite EC ES.
+move=>?? S EC ES; rewrite {}EC {}ES in S.
+by case: (S _ _ R).
 Qed.
 
 Definition triple (P: assertion) (c: com) (Q: assertion) : Prop :=
@@ -1090,55 +1106,73 @@ Notation "⦃⦃ P ⦄⦄ c ⦃⦃ Q ⦄⦄" := (triple P c Q) (at level 90, c a
 Lemma triple_skip: forall P,
       ⦃⦃ P ⦄⦄ SKIP ⦃⦃ P ⦄⦄.
 Proof.
-by move=>???; apply: safe_now.
+by move=>???; pfold; apply: safe_now.
 Qed.
 
 Lemma triple_assign: forall P x a,
       ⦃⦃ aupdate x a P ⦄⦄ ASSIGN x a ⦃⦃ P ⦄⦄.
 Proof.
-move=>? x a s ?; apply: safe_step=>// c' s' R.
-case: {-1}_ {-1}_ / R (erefl (ASSIGN x a, s)) (erefl (c', s'))=>// ???.
-case=><-<-<-; case=>->->.
+move=>? x a s ?; pfold; apply: safe_step=>// c' s' R.
+case: {-2}_ {-1}_ / R (erefl (ASSIGN x a, s)) (erefl (c', s'))=>// ???.
+case=>->->->; case=>->->; left; pfold.
 by apply: safe_now.
 Qed.
 
 Remark safe_seq:
-  forall (Q R: assertion) (c': com),
+  forall (Q R: assertion) c' r,
+  (forall s, Q s -> upaco2 (safe_gen R) r c' s) ->
+  forall c s, safe Q c s -> paco2 (safe_gen R) r (c ;; c') s.
+Proof.
+move=>?? c0 ? QR.
+pcofix CHR=>?? S; pfold.
+punfold S. elim: S =>c1 s.
+- move=>-> Qs; apply: safe_step=>// c' s' R.
+  case: {-2}_ {-1}_ / R (erefl (SKIP;;c0, s)) (erefl (c', s'))=>//.
+  - move=>??; case=>->->; case=>->->.
+    case: (QR _ Qs)=>H; [left|right].
+    - by apply: paco2_mon; first by exact: H.
+    - by apply: CHR0.
+  - move=>?? s1 ?? R; case=>E2; rewrite E2 in R.
+    by case: {-1}_ _ / R (erefl (SKIP, s1)).
+- move=>NT ? H1; apply: safe_step=>// c' s' R.
+  case: {-2}_ {-1}_ / R (erefl (c1;;c0, s)) (erefl (c', s'))=>//.
+  - move=>??; case=>E1.
+    by rewrite -E1 /terminated in NT.
+  - move=>????? R; case=>E1->E2; case=>->->; rewrite {}E1 {}E2 in R.
+    by right; apply CHR; case: (H1 _ _ R).
+Qed.
+
+Remark safe_seq0:
+  forall (Q R: assertion) c',
   (forall s, Q s -> safe R c' s) ->
   forall c s, safe Q c s -> safe R (c ;; c') s.
 Proof.
-  intros Q R c2 QR. cofix CHR; destruct 1.
-  - rewrite H. apply safe_step. unfold terminated; congruence. cbn; auto.
-    intros c' s' RED; inversion RED; clear RED. rewrite <- H4. apply QR; auto. congruence.
-    inv H2.
-  - apply safe_step. unfold terminated; congruence. cbn; auto.
-    intros c' s' RED; inversion RED.
-    + elim H; red; auto.
-    + apply CHR. apply H1; auto.
-Defined.
+by move=>??? H0 ?? H; apply/safe_seq/H =>??; left; apply: H0.
+Qed.
 
 Lemma triple_seq: forall P Q R c1 c2,
       ⦃⦃ P ⦄⦄ c1 ⦃⦃ Q ⦄⦄ -> ⦃⦃ Q ⦄⦄ c2 ⦃⦃ R ⦄⦄ ->
       ⦃⦃ P ⦄⦄ c1;;c2 ⦃⦃ R ⦄⦄.
 Proof.
-  intros. intros s PRE. apply safe_seq with Q; auto.
+by move=>????? H ???; apply/safe_seq0/H.
 Qed.
 
 Lemma triple_while: forall P b c,
-   ⦃⦃ atrue b //\\ P ⦄⦄ c ⦃⦃ P  ⦄⦄ ->
+   ⦃⦃ atrue b //\\ P ⦄⦄ c ⦃⦃ P ⦄⦄ ->
    ⦃⦃ P ⦄⦄ WHILE b c ⦃⦃ afalse b //\\ P ⦄⦄.
 Proof.
-  intros P b c T.
-  assert (REC: forall s, P s ->
-               safe (afalse b //\\ P) (WHILE b c) s ).
-  { cofix CHR; intros s Ps. apply safe_step. unfold terminated; congruence. cbn; auto.
-    intros c' s' RED; inversion RED.
-  - apply safe_now. red; auto. split; auto. congruence.
-  - apply safe_seq with P.
-    + intros s'' Ps''. apply CHR. auto.
-    + apply T. split; auto. congruence.
-  }
-  intros s PRE. apply REC. auto.
+move=>P b c T.
+have REC: forall s, P s ->
+            safe (afalse b //\\ P) (WHILE b c) s.
+- pcofix CHR=>s ?; pfold.
+  apply: safe_step=>// c' s' R.
+  case: {-2}_ {-1}_ / R (erefl (WHILE b c, s)) (erefl (c', s'))=>// ??? B.
+  - case=>EB _ ES; case=>->->; rewrite {}EB {}ES in B *.
+    by left; pfold; apply: safe_now.
+  - case=>EB->ES; case=>->->; rewrite {}EB {}ES in B *.
+    left; apply/(safe_seq P)/T=>// ??.
+    by right; apply: CHR.
+by move=>??; apply: REC.
 Qed.
 
 Lemma triple_ifthenelse: forall P Q b c1 c2,
@@ -1146,53 +1180,56 @@ Lemma triple_ifthenelse: forall P Q b c1 c2,
       ⦃⦃ afalse b //\\ P ⦄⦄ c2 ⦃⦃ Q ⦄⦄ ->
       ⦃⦃ P ⦄⦄ IFTHENELSE b c1 c2 ⦃⦃ Q ⦄⦄.
 Proof.
-  intros; intros s PRE. apply safe_step. unfold terminated; congruence. cbn; auto.
-  intros c' s' RED; inv RED.
-  destruct (beval b s') eqn:B.
-- apply H; split; auto.
-- apply H0; split; auto.
+move=>?? b c1 c2 H1 H2 s ?; pfold; apply: safe_step=>// c' s' R.
+case: {-2}_ {-1}_ / R (erefl (IFTHENELSE b c1 c2, s)) (erefl (c', s'))=>// ????.
+case=>->->->->; case=>->->.
+by left; case/boolP: (beval _ _)=>B; [apply: H1|apply: H2].
 Qed.
 
 Lemma triple_havoc: forall x Q,
       ⦃⦃ aforall (fun n => aupdate x (CONST n) Q) ⦄⦄ HAVOC x ⦃⦃ Q ⦄⦄.
 Proof.
-  intros; intros s PRE. apply safe_step. unfold terminated; congruence. cbn; auto.
-  intros c' s' RED; inv RED. constructor. red; auto. apply PRE.
+move=>x ? s H; pfold; apply: safe_step=>// c' s' R.
+case: {-2}_ {-1}_ / R (erefl (HAVOC x, s)) (erefl (c', s'))=>// ???.
+case=>->->; case=>->->.
+by left; pfold; apply/safe_now/H.
 Qed.
 
 Lemma triple_assert: forall b P,
       ⦃⦃ atrue b //\\ P ⦄⦄ ASSERT b ⦃⦃ atrue b //\\ P ⦄⦄.
 Proof.
-  intros. intros s [PRE1 PRE2]. red in PRE1.
-  apply safe_step. unfold terminated; congruence. cbn; congruence.
-  intros c' s' RED; inv RED. apply safe_now; auto. red; auto. split; auto.
+move=>b ? s [PR ?]; pfold; apply: safe_step=>//=; first by rewrite PR.
+move=>c' s' R.
+case: {-2}_ {-1}_ / R (erefl (ASSERT b, s)) (erefl (c', s'))=>// ?? B.
+case=>EB ES; case=>->->; rewrite {}EB {}ES in B *.
+by left; pfold; apply: safe_now.
 Qed.
 
 Lemma triple_consequence: forall P Q P' Q' c,
       ⦃⦃ P ⦄⦄ c ⦃⦃ Q ⦄⦄ -> P' -->> P -> Q -->> Q' ->
       ⦃⦃ P' ⦄⦄ c ⦃⦃ Q' ⦄⦄.
 Proof.
-  intros.
-  assert (REC: forall c s, safe Q c s -> safe Q' c s).
-  { cofix CH. destruct 1.
-  - apply safe_now; auto.
-  - apply safe_step; auto.
-  }
-  red; auto.
+move=>? Q ? Q' ? H H1 H2 ??.
+have REC: forall c s, safe Q c s -> safe Q' c s.
+- pcofix CH=>?? S; punfold S; pfold; case: S=>??.
+  - by move=>??; apply/safe_now/H2.
+  - move=>?? ST; apply: safe_step=>// ?? R.
+    by right; apply: CH; case: (ST _ _ R).
+by apply/REC/H/H1.
 Qed.
 
 Theorem Hoare_sound:
   forall P c Q, ⦃ P ⦄ c ⦃ Q ⦄ -> ⦃⦃ P ⦄⦄ c ⦃⦃ Q ⦄⦄.
 Proof.
-  induction 1.
-- apply triple_skip.
-- apply triple_assign.
-- apply triple_seq with Q; auto.
-- apply triple_ifthenelse; auto.
-- apply triple_while; auto.
-- apply triple_havoc; auto.
-- apply triple_assert; auto.
-- apply triple_consequence with P Q; auto.
+move=>???; elim.
+- by apply: triple_skip.
+- by apply: triple_assign.
+- by move=>?????? H ??; apply: triple_seq; first by exact: H.
+- by move=>*; apply: triple_ifthenelse.
+- by move=>*; apply: triple_while.
+- by apply: triple_havoc.
+- by move=>*; apply: triple_assert.
+- by move=>?????? H ??; apply: triple_consequence; first by exact: H.
 Qed.
 
 End Soundness3.
