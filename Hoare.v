@@ -1470,45 +1470,45 @@ Qed.
 Lemma Hoare_sem_wp:
   forall c Q, ⦃ sem_wp c Q ⦄ c ⦃ Q ⦄.
 Proof.
-  induction c; intros Q.
-- eapply Hoare_consequence_pre. apply Hoare_skip.
-  intros s W. eapply safe_terminated_inv. eexact W. red; auto.
-- eapply Hoare_consequence_pre. apply Hoare_assign.
-  intros s W.
-  assert (W': safe Q SKIP (update x (aeval a s) s)).
-  { eapply safe_step_inv. eexact W. apply red_assign. }
-  apply safe_terminated_inv in W'. assumption. red; auto.
-- apply Hoare_seq with (sem_wp c2 Q); auto.
-  eapply Hoare_consequence_pre. apply IHc1.
-  intros s; apply sem_wp_seq.
-- apply Hoare_ifthenelse.
-  + eapply Hoare_consequence_pre. apply IHc1.
-    intros s [P1 P2]. replace c1 with (if beval b s then c1 else c2).
-    eapply safe_step_inv. eexact P2. constructor. rewrite P1; auto.
-  + eapply Hoare_consequence_pre. apply IHc2.
-    intros s [P1 P2]. replace c2 with (if beval b s then c1 else c2).
-    eapply safe_step_inv. eexact P2. constructor. rewrite P1; auto.
-- eapply Hoare_consequence_post. apply Hoare_while.
-  eapply Hoare_consequence_pre. apply IHc.
-  + intros s [P1 P2].
-    apply sem_wp_seq. eapply safe_step_inv. eexact P2. constructor. exact P1.
-  + intros s [P1 P2].
-    eapply safe_terminated_inv. eapply safe_step_inv. eexact P2. apply red_while_done. exact P1. red; auto.
-- eapply Hoare_consequence. apply Hoare_assert.
-  + intros s SAFE.
-    assert (NOTSTUCK: ~ (error (ASSERT b) s)).
-    { eapply safe_not_stuck; eauto. unfold terminated; congruence. }
-    assert (B: beval b s).
-    { cbn in NOTSTUCK. destruct (beval b s); auto. }
-    assert (FINAL: Q s).
-    { eapply safe_terminated_inv. eapply safe_step_inv. eexact SAFE. constructor. auto. red; auto. }
-    split. exact B. exact FINAL.
-  + intros s; unfold aand; tauto.
-- eapply Hoare_consequence_pre. apply Hoare_havoc.
-  intros s W n.
-  assert (W': safe Q SKIP (update x n s)).
-  { eapply safe_step_inv. eexact W. apply red_havoc. }
-  apply safe_terminated_inv in W'. assumption. red; auto.
+elim.
+- move=>?; apply: Hoare_consequence_pre; first by exact: Hoare_skip.
+  by move=>? W; apply: safe_terminated_inv; first by exact: W.
+- move=>x a Q; apply: Hoare_consequence_pre; first by exact: Hoare_assign.
+  move=>s ?.
+  apply: (@safe_terminated_inv _ _ (update x (aeval a s) s))=>//.
+  by apply/safe_step_inv/red_assign.
+- move=>? IH1 c2 ? Q; apply: (@Hoare_seq _ (sem_wp c2 Q))=>//.
+  apply: Hoare_consequence_pre; first by apply: IH1.
+  move=>?; by exact: sem_wp_seq.
+- move=>b c1 IH1 c2 IH2 ?; apply: Hoare_ifthenelse.
+  - apply: Hoare_consequence_pre; first by apply: IH1.
+    move=>s [A B].
+    have ->: (c1 = if beval b s then c1 else c2) by rewrite A.
+    apply: safe_step_inv; first by apply: B.
+    by apply: red_ifthenelse.
+  - apply: Hoare_consequence_pre; first by apply: IH2.
+    move=>s [A B].
+    have ->: (c2 = if beval b s then c1 else c2) by move/negPf: A=>->.
+    apply: safe_step_inv; first by apply: B.
+    by apply: red_ifthenelse.
+- move=>?? IH ?; apply: Hoare_consequence_post.
+  - apply/Hoare_while/Hoare_consequence_pre; first by apply: IH.
+    move=>?[? B]; apply/sem_wp_seq/safe_step_inv; first by apply: B.
+    by apply: red_while_loop.
+  move=>?[? B]; apply: (safe_terminated_inv _ SKIP)=>//.
+  apply: safe_step_inv; first by apply: B.
+  by apply: red_while_done.
+- move=>b Q; apply: Hoare_consequence; first by [apply: (Hoare_assert Q)]; last by move=>? [].
+  move=>s H.
+  suff: beval b s.
+  - split=>//; apply: (safe_terminated_inv _ SKIP)=>//.
+    by apply: safe_step_inv; [apply: H | apply: red_assert].
+  apply/negPn/negP.
+  by move/safe_not_stuck: H; apply.
+move=>x ?; apply: Hoare_consequence_pre; first by apply: Hoare_havoc.
+move=>s H n.
+apply: (safe_terminated_inv _ _ (update x n s))=>//.
+by apply: safe_step_inv; [apply: H| apply: red_havoc].
 Qed.
 
 (** Relative completeness follows. *)
@@ -1516,9 +1516,9 @@ Qed.
 Theorem Hoare_complete:
   forall P c Q, ⦃⦃ P ⦄⦄ c ⦃⦃ Q ⦄⦄ -> ⦃ P ⦄ c ⦃ Q ⦄.
 Proof.
-  intros. apply Hoare_consequence_pre with (sem_wp c Q).
-  apply Hoare_sem_wp.
-  intros s. apply H.
+move=>? c Q H.
+apply: (Hoare_consequence_pre (sem_wp c Q)); first by apply: Hoare_sem_wp.
+by move=>?; apply: H.
 Qed.
 
 End Completeness.
@@ -1544,7 +1544,7 @@ Fixpoint erase (c: com) :=
   | ASSIGN x a => Hoare.ASSIGN x a
   | SEQ c1 c2 => Hoare.SEQ (erase c1) (erase c2)
   | IFTHENELSE b c1 c2 => Hoare.IFTHENELSE b (erase c1) (erase c2)
-  | WHILE Inv b c => Hoare.WHILE b (erase c)
+  | WHILE _ b c => Hoare.WHILE b (erase c)
   | ASSERT b => Hoare.ASSERT b
   | HAVOC x => Hoare.HAVOC x
   end.
@@ -1555,7 +1555,7 @@ Fixpoint wlp (c: com) (Q: assertion) : assertion :=
   | ASSIGN x a => aupdate x a Q
   | SEQ c1 c2 => wlp c1 (wlp c2 Q)
   | IFTHENELSE b c1 c2 => (atrue b //\\ wlp c1 Q) \\// (afalse b //\\ wlp c2 Q)
-  | WHILE Inv b c => Inv
+  | WHILE Inv _ _ => Inv
   | ASSERT b => atrue b //\\ Q
   | HAVOC x => aforall (fun n => aupdate x (CONST n) Q)
   end.
@@ -1569,8 +1569,8 @@ Fixpoint vcond (c: com) (Q: assertion) : Prop :=
       vcond c Inv /\
       (atrue b //\\ Inv -->> wlp c Inv) /\
       (afalse b //\\ Inv -->> Q)
-  | ASSERT b => True
-  | HAVOC x => True
+  | ASSERT _ => True
+  | HAVOC _ => True
   end.
 
 Definition vcgen (P: assertion) (c: com) (Q: assertion) : Prop :=
@@ -1579,27 +1579,28 @@ Definition vcgen (P: assertion) (c: com) (Q: assertion) : Prop :=
 Lemma wlp_sound: forall c Q,
   vcond c Q -> ⦃ wlp c Q ⦄ erase c ⦃ Q ⦄.
 Proof.
-  induction c; intros Q VC; cbn.
-- apply Hoare_skip.
-- apply Hoare_assign.
-- destruct VC as [VC1 VC2]. eapply Hoare_seq. apply IHc1; auto. apply IHc2; auto.
-- destruct VC as [VC1 VC2].
-  apply Hoare_ifthenelse; eapply Hoare_consequence_pre; eauto.
-  + intros s. unfold aand, aor, atrue, afalse. intuition congruence.
-  + intros s. unfold aand, aor, atrue, afalse. intuition congruence.
-- destruct VC as (VC1 & VC2 & VC3).
-  eapply Hoare_consequence_post. apply (Hoare_while Inv).
-  eapply Hoare_consequence_pre. apply IHc; auto. exact VC2.
-  exact VC3.
-- eapply Hoare_consequence_post. apply Hoare_assert.
-  intros s [P1 P2]; auto.
-- apply Hoare_havoc.
+elim=>/=.
+- by move=>??; apply: Hoare_skip.
+- by move=>????; apply: Hoare_assign.
+- by move=>? IH1 ? IH2 ?[??]; apply: Hoare_seq; [apply: IH1| apply: IH2].
+- move=>?? IH1 ? IH2 ?[??]; apply: Hoare_ifthenelse.
+  - apply: Hoare_consequence_pre; first by apply: IH1.
+    move=> ?[B]; case; case=>//.
+    by rewrite /afalse B.
+  - apply: Hoare_consequence_pre; first by apply: IH2.
+    move=> ?[B]; case; case=>// A.
+    by rewrite /afalse A in B.
+- move=>??? IH ?[?][?]; apply/Hoare_consequence_post/Hoare_while.
+  by apply: Hoare_consequence_pre; first by apply: IH.
+- move=>???; apply: Hoare_consequence_post; first by exact: Hoare_assert.
+  by move=>? [].
+- by move=>???; apply: Hoare_havoc.
 Qed.
 
 Theorem vcgen_sound: forall P c Q,
   vcgen P c Q -> ⦃ P ⦄ erase c ⦃ Q ⦄.
 Proof.
-  intros P c Q [VC1 VC2]. eapply Hoare_consequence_pre. apply wlp_sound; auto. auto.
+by move=>???[?]; apply/Hoare_consequence_pre/wlp_sound.
 Qed.
 
 End WP.
@@ -1616,7 +1617,7 @@ Fixpoint sp (P: assertion) (c: com) : assertion :=
   | ASSIGN x a => aexists (fun x0 => aexists (fun v => aequal (VAR x) v //\\ aupdate x (CONST x0) (P //\\ aequal a v)))
   | SEQ c1 c2 => sp (sp P c1) c2
   | IFTHENELSE b c1 c2 => sp (atrue b //\\ P) c1 \\// sp (afalse b //\\ P) c2
-  | WHILE Inv b c => afalse b //\\ Inv
+  | WHILE Inv b _ => afalse b //\\ Inv
   | ASSERT b => atrue b //\\ P
   | HAVOC x => aexists (fun n => aupdate x (CONST n) P)
   end.
@@ -1632,7 +1633,7 @@ Fixpoint vcond (P: assertion) (c: com) : Prop :=
       (sp (atrue b //\\ Inv) c -->> Inv)
   | ASSERT b =>
       (P -->> atrue b)
-  | HAVOC x => True
+  | HAVOC _ => True
   end.
 
 Definition vcgen (P: assertion) (c: com) (Q: assertion) : Prop :=
@@ -1641,34 +1642,34 @@ Definition vcgen (P: assertion) (c: com) (Q: assertion) : Prop :=
 Lemma sp_sound: forall c P,
   vcond P c -> ⦃ P ⦄ erase c ⦃ sp P c ⦄.
 Proof.
-  induction c; intros P VC; cbn.
-- apply Hoare_skip.
-- apply Floyd_assign.
-- destruct VC as [VC1 VC2]. eapply Hoare_seq. apply IHc1; auto. apply IHc2; auto.
-- destruct VC as [VC1 VC2].
-  apply Hoare_ifthenelse; eapply Hoare_consequence_post; eauto.
-  + intros s. unfold aand, aor, atrue, afalse; tauto.
-  + intros s. unfold aand, aor, atrue, afalse; tauto.
-- destruct VC as (VC1 & VC2 & VC3).
-  eapply Hoare_consequence_pre. 2: eexact VC2.
-  apply (Hoare_while Inv).
-  eapply Hoare_consequence_post. apply IHc. eexact VC1. eexact VC3.
-- red in VC. eapply Hoare_consequence_pre. apply Hoare_assert.
-  intros s Ps. split; auto.
-- eapply Hoare_consequence_pre. apply Hoare_havoc.
-  intros s Ps n. exists (s x). cbn.
-  set (s' := update x n s).
-  set (s'' := update x (s x) s').
-  assert (s'' = s).
-  { apply functional_extensionality; intros y.
-    unfold s'', s', update. destruct (string_dec x y); congruence. }
-  red; cbn. fold s''. congruence.
+elim=>/=.
+- by move=>??; apply: Hoare_skip.
+- by move=>????; apply: Floyd_assign.
+- by move=>? IH1 ? IH2 ?[??]; apply: Hoare_seq; [apply: IH1| apply: IH2].
+- move=>?? IH1 ? IH2 ?[??]; apply: Hoare_ifthenelse.
+  - apply: Hoare_consequence_post; first by apply: IH1.
+    by move=>??; left.
+  - apply: Hoare_consequence_post; first by apply: IH2.
+    by move=>??; right.
+- move=>??? IH ?[?][A]B; apply/Hoare_consequence_pre/A.
+  by apply/Hoare_while/Hoare_consequence_post/B/IH.
+- move=>?? H; apply: Hoare_consequence_pre; first by exact: Hoare_assert.
+  by move=>??; split=>//; apply: H.
+- move=>x ??; apply: Hoare_consequence_pre; first by exact: Hoare_havoc.
+  move=>s H n; exists (s x)=>/=.
+  set s' := update x n s.
+  set s'' := update x (s x) s'.
+  have E : s = s''.
+  - apply: functional_extensionality=>?; rewrite /s'' /s' /update; case: ifP.
+    - by move/eqP=>->.
+    - by move=>->.
+  by rewrite E /s'' /s' in H.
 Qed.
 
 Theorem vcgen_sound: forall P c Q,
   vcgen P c Q -> ⦃ P ⦄ erase c ⦃ Q ⦄.
 Proof.
-  intros P c Q [VC1 VC2]. eapply Hoare_consequence_post. apply sp_sound; auto. auto.
+by move=>???[?]; apply/Hoare_consequence_post/sp_sound.
 Qed.
 
 End SP.
