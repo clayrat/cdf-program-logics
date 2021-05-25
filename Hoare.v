@@ -1,7 +1,7 @@
 (** Hoare logic. *)
 
 From Coq Require Import ssreflect ssrfun ssrbool Lia Bool String List (*Program.Equality*).
-From mathcomp Require Import ssrint ssralg ssrnum eqtype order zify.
+From mathcomp Require Import ssrnat ssrint ssralg ssrnum eqtype order zify.
 From Coq Require Import FunctionalExtensionality.
 From Paco Require Import paco.
 From CDF Require Import Sequences.
@@ -1259,38 +1259,49 @@ Notation "⦃⦃ P ⦄⦄ c ⦃⦃ Q ⦄⦄" := (triple P c Q) (at level 90, c a
 Lemma safe_mono:
   forall Q n c s, safe Q n c s -> forall n', (n' <= n)%nat -> safe Q n' c s.
 Proof.
-  induction 1; intros.
-- replace n' with O by lia. constructor.
-- destruct n'. constructor. apply safe_now; auto.
-- destruct n'. constructor. apply safe_step; auto. intros. apply H2; auto. lia.
+move=>????; elim.
+- by move=>???; rewrite leqn0=>/eqP->; exact: safe_zero.
+- move=>?????; case=>[?|??]; first by exact: safe_zero.
+  by apply: safe_now.
+- move=>?????? H2; case=>[?|??]; first by exact: safe_zero.
+  by apply: safe_step=>// ???; apply: H2.
 Qed.
 
 Lemma safe_now': forall (Q: assertion) n c s,
   terminated c -> Q s -> safe Q n c s.
 Proof.
-  intros. destruct n. constructor. apply safe_now; auto.
+move=>?; case.
+- by move=>????; exact: safe_zero.
+- by move=>?????; apply: safe_now.
 Qed.
 
 Lemma safe_terminated_inv: forall Q n c s,
   safe Q (S n) c s -> terminated c -> Q s.
 Proof.
-  intros. inv H. auto. contradiction.
+move=>? n c ? HS HT.
+case: {-1}_ {-2}_ _ / HS (erefl (S n)) (erefl c)=>//.
+move=>??? NT _ _ _ EC.
+by rewrite EC in NT; rewrite HT /terminated in NT.
 Qed.
 
 Lemma safe_notstuck: forall Q n c s,
   safe Q (S n) c s -> ~error c s.
 Proof.
-  intros. inv H.
-- rewrite H1. cbn; auto.
-- auto.
+move=>? n c ? H.
+case: {-1}_ {-2}_ _ / H (erefl (S n)) (erefl c)=>//.
+by rewrite /terminated=>???-> /= ???.
 Qed.
 
 Lemma safe_step_inv: forall Q n c s c' s',
   safe Q (S n) c s -> red (c, s) (c', s') -> safe Q n c' s'.
 Proof.
-  intros. inv H.
-- rewrite H2 in H0; inv H0.
-- eauto.
+move=>? n c s ?? H R.
+case: {-1}_ {-2}_ {-2}_ / H (erefl (S n)) (erefl c) (erefl s)=>//.
+- move=>??? T ?? EC.
+  rewrite EC /terminated in T; rewrite T in R.
+  by case: {-1}_ _ / R (erefl (SKIP, s)).
+- move=>????? H; case=>-> EC ES; rewrite {}EC {}ES in H.
+  by apply: H.
 Qed.
 
 (** Deduction rules. *)
@@ -1298,16 +1309,17 @@ Qed.
 Lemma triple_skip: forall P,
       ⦃⦃ P ⦄⦄ SKIP ⦃⦃ P ⦄⦄.
 Proof.
-  intros P n s PRE. apply safe_now'. reflexivity. auto.
+by move=>????; apply: safe_now'.
 Qed.
 
 Lemma triple_assign: forall P x a,
       ⦃⦃ aupdate x a P ⦄⦄ ASSIGN x a ⦃⦃ P ⦄⦄.
 Proof.
-  intros P x a n s PRE. destruct n. constructor. apply safe_step.
-- unfold terminated; congruence.
-- cbn; tauto.
-- intros c' s' RED; inv RED. apply triple_skip. exact PRE.
+move=>? x a n s ?; case: n; first by exact: safe_zero.
+move=>?; apply: safe_step=>// c' s' R.
+case: {-2}_ {-1}_ / R (erefl (ASSIGN x a, s)) (erefl (c', s'))=>// ???.
+case=>->->->; case=>->->.
+by apply: triple_skip.
 Qed.
 
 Remark safe_seq:
@@ -1315,34 +1327,44 @@ Remark safe_seq:
   (forall n' s, (n' < n)%nat -> Q s -> safe R n' c' s) ->
   forall c s, safe Q n c s -> safe R n (c ;; c') s.
 Proof.
-  intros Q R c2. induction n; intros QR c s SF.
-- constructor.
-- apply safe_step. unfold terminated; congruence.
-  + cbn. eapply safe_notstuck; eauto.
-  + intros c' s' RED. inv RED.
-    * apply QR. lia. eapply safe_terminated_inv; eauto. red; auto.
-    * apply IHn.
-      intros; apply QR; auto.
-      eapply safe_step_inv; eauto.
+move=>?? c0; elim.
+- by move=>????; exact: safe_zero.
+- move=>? IH QR c s H; apply: safe_step=>//=; first by apply/safe_notstuck/H.
+  move=>c' s' R.
+  case: {-2}_ {-1}_ / R (erefl (c;;c0, s)) (erefl (c', s'))=>//.
+  - move=>??; case=>EC->->; case=>->->.
+    apply: QR; first by exact: ltnSn.
+    apply: safe_terminated_inv; first by exact: H.
+    by rewrite -EC.
+  - move=>????? R; case=>EC->ES; case=>->->; rewrite {}EC {}ES in R.
+    apply: IH.
+    - move=>????; apply: QR=>//.
+      by rewrite ltnS; apply: ltnW.
+    by apply: safe_step_inv; first by exact: H.
 Qed.
 
 Lemma triple_seq: forall P Q R c1 c2,
       ⦃⦃ P ⦄⦄ c1 ⦃⦃ Q ⦄⦄ -> ⦃⦃ Q ⦄⦄ c2 ⦃⦃ R ⦄⦄ ->
       ⦃⦃ P ⦄⦄ c1;;c2 ⦃⦃ R ⦄⦄.
 Proof.
-  intros. intros n s PRE. apply safe_seq with Q; auto.
+move=>? Q ??? H1 H2 ???.
+by apply: (safe_seq Q); [move=>???; apply: H2|apply: H1].
 Qed.
 
 Lemma triple_while: forall P b c,
    ⦃⦃ atrue b //\\ P ⦄⦄ c ⦃⦃ P  ⦄⦄ ->
    ⦃⦃ P ⦄⦄ WHILE b c ⦃⦃ afalse b //\\ P ⦄⦄.
 Proof.
-  intros P b c T. red. induction n; intros s Ps. constructor.
-  apply safe_step. unfold terminated; congruence. cbn; auto.
-  intros c' s' RED; inv RED.
-- apply triple_skip. split; auto.
-- apply safe_seq with P. intros. apply safe_mono with n. apply IHn; auto. lia.
-  apply T. split; auto.
+move=>P b c T; elim.
+- by move=>??; exact: safe_zero.
+move=>? IH s ?; apply: safe_step=>// c' s' R.
+case: {-2}_ {-1}_ / R (erefl (WHILE b c, s)) (erefl (c', s'))=>// ??? B.
+- case=>EB _ ES; case=>->->; rewrite {}EB {}ES in B *.
+  by apply: triple_skip.
+case=>EB -> ES; case=>->->; rewrite {}EB {}ES in B *.
+apply/safe_seq/T=>// ????.
+apply: safe_mono; first by apply: IH.
+by apply: ltnW.
 Qed.
 
 Lemma triple_ifthenelse: forall P Q b c1 c2,
@@ -1350,57 +1372,60 @@ Lemma triple_ifthenelse: forall P Q b c1 c2,
       ⦃⦃ afalse b //\\ P ⦄⦄ c2 ⦃⦃ Q ⦄⦄ ->
       ⦃⦃ P ⦄⦄ IFTHENELSE b c1 c2 ⦃⦃ Q ⦄⦄.
 Proof.
-  intros; intros n s PRE. destruct n. constructor.
-  apply safe_step. unfold terminated; congruence. cbn; auto.
-  intros c' s' RED; inv RED.
-  destruct (beval b s') eqn:B.
-- apply H; split; auto.
-- apply H0; split; auto.
+move=>?? b c1 c2 HT HF n s ?; case: n; first by exact: safe_zero.
+move=>?; apply: safe_step=>// c' s' R.
+case: {-2}_ {-1}_ / R (erefl (IFTHENELSE b c1 c2, s)) (erefl (c', s'))=>// ????.
+case=>->->->->; case=>->->.
+by case/boolP: (beval _ _)=>?; [apply: HT|apply: HF].
 Qed.
 
 Lemma triple_havoc: forall x Q,
       ⦃⦃ aforall (fun n => aupdate x (CONST n) Q) ⦄⦄ HAVOC x ⦃⦃ Q ⦄⦄.
 Proof.
-  intros; intros n s PRE. destruct n. constructor.
-  apply safe_step. unfold terminated; congruence. cbn; auto.
-  intros c' s' RED; inv RED. apply safe_now'. red; auto. apply PRE.
+move=>x ? n s H; case: n; first by exact: safe_zero.
+move=>?; apply: safe_step=>// c' s' R.
+case: {-2}_ {-1}_ / R (erefl (HAVOC x, s)) (erefl (c', s'))=>// ???.
+case=>->->; case=>->->.
+by apply/safe_now'/H.
 Qed.
 
 Lemma triple_assert: forall b P,
       ⦃⦃ atrue b //\\ P ⦄⦄ ASSERT b ⦃⦃ atrue b //\\ P ⦄⦄.
 Proof.
-  intros. intros n s [PRE1 PRE2]. red in PRE1.
-  destruct n. constructor.
-  apply safe_step. unfold terminated; congruence. cbn; congruence.
-  intros c' s' RED; inv RED. apply safe_now'; auto. red; auto. split; auto.
+move=>b ? n s [A ?]; case: n; first by exact: safe_zero.
+move=>?; apply: safe_step=>//=.
+- by rewrite /atrue in A; rewrite A.
+move=>c' s' R.
+case: {-2}_ {-1}_ / R (erefl (ASSERT b, s)) (erefl (c', s'))=>// ?? B.
+case=>EB ES; case=>->->; rewrite {}EB {}ES in B *.
+by apply: safe_now'.
 Qed.
 
 Lemma triple_consequence: forall P Q P' Q' c,
       ⦃⦃ P ⦄⦄ c ⦃⦃ Q ⦄⦄ -> P' -->> P -> Q -->> Q' ->
       ⦃⦃ P' ⦄⦄ c ⦃⦃ Q' ⦄⦄.
 Proof.
-  intros.
-  assert (REC: forall n c s, safe Q n c s -> safe Q' n c s).
-  { induction 1.
-  - constructor.
-  - apply safe_now; auto.
-  - apply safe_step; auto.
-  }
-  red; auto.
+move=>? Q ? Q' ? H HP HQ ???.
+have REC: forall n c s, safe Q n c s -> safe Q' n c s.
+- move=>???; elim.
+  - by exact: safe_zero.
+  - by move=>?????; apply/safe_now/HQ.
+  - by move=>???????; apply: safe_step.
+by apply/REC/H/HP.
 Qed.
 
 Theorem Hoare_sound:
   forall P c Q, ⦃ P ⦄ c ⦃ Q ⦄ -> ⦃⦃ P ⦄⦄ c ⦃⦃ Q ⦄⦄.
 Proof.
-  induction 1.
-- apply triple_skip.
-- apply triple_assign.
-- apply triple_seq with Q; auto.
-- apply triple_ifthenelse; auto.
-- apply triple_while; auto.
-- apply triple_havoc; auto.
-- apply triple_assert; auto.
-- apply triple_consequence with P Q; auto.
+move=>???; elim.
+- by apply: triple_skip.
+- by apply: triple_assign.
+- by move=>?????? H ??; apply: triple_seq; first by exact: H.
+- by move=>*; apply: triple_ifthenelse.
+- by move=>*; apply: triple_while.
+- by apply: triple_havoc.
+- by move=>*; apply: triple_assert.
+- by move=>?????? H ??; apply: triple_consequence; first by exact: H.
 Qed.
 
 End Soundness4.
@@ -1417,21 +1442,26 @@ Import Soundness3.
 Definition sem_wp (c: com) (Q: assertion) : assertion :=
   fun s => safe Q c s.
 
-Lemma terminated_dec: forall c, {terminated c} + {~terminated c}.
+Lemma terminated_dec: forall c, decidable (terminated c).
 Proof.
-  unfold terminated. destruct c; (left; reflexivity) || (right; discriminate).
+by rewrite /terminated; case; try by [left|right].
 Qed.
 
 Lemma sem_wp_seq: forall c1 c2 Q s,
   sem_wp (c1 ;; c2) Q s -> sem_wp c1 (sem_wp c2 Q) s.
 Proof.
-  unfold sem_wp; cofix CH; intros c1 c2 Q s SAFE.
-  destruct (terminated_dec c1).
-- apply safe_now. auto.
-  eapply safe_step_inv. eauto. rewrite t. constructor.
-- apply safe_step. auto.
-  change (~ (error (c1;;c2) s)).  eapply safe_not_stuck; eauto. unfold terminated; congruence.
-  intros. apply CH. eapply safe_step_inv. eexact SAFE. constructor; auto.
+rewrite /sem_wp=>+ c2 Q.
+pcofix CH=>c1 s S; pfold.
+case: (terminated_dec c1)=>T.
+- apply: safe_now=>//.
+  apply: safe_step_inv; first by exact: S.
+  by rewrite T; exact: red_seq_done.
+apply: safe_step=>//.
+- suff: ~(error (c1;;c2) s) by [].
+  by apply: safe_not_stuck=>//; exact: S.
+move=>?? R; right; apply: CH.
+apply: safe_step_inv; first by exact: S.
+by apply: red_seq_step.
 Qed.
 
 (** Show that the triple [ { sem_wp c Q } c { Q } ] is derivable using the rules
