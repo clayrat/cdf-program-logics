@@ -1,15 +1,12 @@
 (** Hoare logic. *)
 
-From Coq Require Import ssreflect ssrfun ssrbool Lia Bool String List (*Program.Equality*).
+From Coq Require Import ssreflect ssrfun ssrbool Lia String FunctionalExtensionality.
 From mathcomp Require Import ssrnat ssrint ssralg ssrnum eqtype order zify.
-From Coq Require Import FunctionalExtensionality.
 From Paco Require Import paco.
 From CDF Require Import Sequences.
 Import Order.Theory.
 
-Local Open Scope string_scope.
 Local Open Scope ring_scope.
-Local Open Scope list_scope.
 
 (* TODO move to Util *)
 
@@ -1068,7 +1065,7 @@ Qed.
 #[export] Hint Resolve safe_gen_mono : paco.
 
 Definition safe Q c s := paco2 (safe_gen Q) bot2 c s.
-#[export] Hint Unfold seq : core.
+#[export] Hint Unfold safe : core.
 
 Lemma safe_terminated_inv: forall Q c s,
   safe Q c s -> terminated c -> Q s.
