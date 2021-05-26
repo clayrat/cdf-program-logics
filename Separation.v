@@ -1,19 +1,23 @@
 (** Heaps and heap assertions for separation logics. *)
 
-From Coq Require Import ZArith Lia Bool String List.
-From Coq Require Import FunctionalExtensionality PropExtensionality.
+From Coq Require Import ssreflect ssrbool Lia FunctionalExtensionality PropExtensionality.
+From mathcomp Require Import ssrint ssrnum ssralg eqtype order zify.
+Import Order.Theory.
+Local Open Scope ring_scope.
 
-Local Open Scope Z_scope.
+(*From Coq Require Import ZArith Lia Bool String List.
+From Coq Require Import FunctionalExtensionality PropExtensionality.
+Local Open Scope Z_scope.*)
 
 (** * 1. Memory heaps *)
 
-(** A memory heap is a partial function from addresses (memory locations) 
+(** A memory heap is a partial function from addresses (memory locations)
     to values, with a finite domain. *)
 
-Definition addr := Z.
+Definition addr := int.
 
 Record heap : Type := {
-  contents :> addr -> option Z;
+  contents :> addr -> option int;
   isfinite :  exists i, forall j, i <= j -> contents j = None
 }.
 
@@ -21,9 +25,11 @@ Lemma heap_extensionality:
   forall (h1 h2: heap),
   (forall l, h1 l = h2 l) -> h1 = h2.
 Proof.
-  intros. destruct h1 as [c1 fin1], h2 as [c2 fin2].
-  assert (c1 = c2) by (apply functional_extensionality; auto).
-  subst c2. f_equal. apply proof_irrelevance.
+move=>[c1 F1][c2 F2] H.
+have E : c1 = c2 by apply/functional_extensionality/H.
+rewrite E in F1 H *.
+suff : F1 = F2 by move=>->.
+by apply: proof_irrelevance.
 Qed.
 
 (** The empty heap. *)
@@ -31,37 +37,39 @@ Qed.
 Program Definition hempty : heap :=
   {| contents := fun l => None |}.
 Next Obligation.
-  exists 0; auto.
+by exists 0.
 Qed.
 
 (** The heap that contains [v] at address [l] and is equal to [h] on
     all other addresses. *)
 
-Program Definition hupdate (l: addr) (v: Z) (h: heap) : heap :=
-  {| contents := fun l' => if Z.eq_dec l l' then Some v else h l' |}.
+Program Definition hupdate (l: addr) (v: int) (h: heap) : heap :=
+  {| contents := fun m => if l == m then Some v else h m |}.
 Next Obligation.
-  destruct (isfinite h) as (i & fin).
-  exists (Z.max i (l + 1)); intros.
-  destruct (Z.eq_dec l j). lia. apply fin; lia.
+case: (isfinite h)=>[i Fi].
+exists (Order.max i (l+1))=>j H.
+case/boolP: (_ == _); first by lia.
+by move=>_; apply: Fi; lia.
 Qed.
 
 Lemma hupdate_same: forall l v h, (hupdate l v h) l = Some v.
 Proof.
-  intros; cbn. destruct (Z.eq_dec l l); congruence.
+by move=>??? /=; rewrite eq_refl.
 Qed.
 
 Lemma hupdate_other: forall l v h l', l <> l' -> (hupdate l v h) l' = h l'.
 Proof.
-  intros; cbn. destruct (Z.eq_dec l l'); congruence.
+by move=>???? /=; case: eqP.
 Qed.
 
 (** The heap [h] after deallocating address [l]. *)
 
 Program Definition hfree (l: addr) (h: heap) : heap :=
-  {| contents := fun l' => if Z.eq_dec l l' then None else h l' |}.
+  {| contents := fun l' => if l == l' then None else h l' |}.
 Next Obligation.
-  destruct (isfinite h) as (i & fin).
-  exists i; intros. destruct (Z.eq_dec l j); auto.
+case: (isfinite h)=>[i Fi].
+exists i=>??; case: ifP=>// _.
+by apply: Fi.
 Qed.
 
 (** The heap [h] where addresses [l, ..., l + sz - 1] are initialized to 0. *)
@@ -70,19 +78,21 @@ Fixpoint hinit (l: addr) (sz: nat) (h: heap) : heap :=
   match sz with O => h | S sz => hupdate l 0 (hinit (l + 1) sz h) end.
 
 Lemma hinit_inside:
-  forall h sz l l', l <= l' < l + Z.of_nat sz -> hinit l sz h l' = Some 0.
+  forall h (sz :nat) l l', l <= l' < l + Posz sz -> hinit l sz h l' = Some 0.
 Proof.
-  induction sz; intros; cbn.
-- lia.
-- destruct (Z.eq_dec l l'); auto. apply IHsz. lia.
+move=>?; elim=>/=.
+- by lia.
+- move=>? IH ???; case: ifP=>// ?.
+  by apply: IH; lia.
 Qed.
 
 Lemma hinit_outside:
-  forall h sz l l', l' < l \/ l + Z.of_nat sz <= l' -> hinit l sz h l' = h l'.
+  forall h sz l l', l' < l \/ l + Posz sz <= l' -> hinit l sz h l' = h l'.
 Proof.
-  induction sz; intros; cbn.
-- auto.
-- destruct (Z.eq_dec l l'). lia. apply IHsz; lia.
+move=>?; elim=>//=.
+move=>? IH ???; case: ifP.
+- by lia.
+- by move=>?; apply: IH; lia.
 Qed.
 
 (** The disjoint union of two heaps. *)
@@ -93,51 +103,61 @@ Definition hdisjoint (h1 h2: heap) : Prop :=
 Lemma hdisjoint_sym:
   forall h1 h2, hdisjoint h1 h2 <-> hdisjoint h2 h1.
 Proof.
-  unfold hdisjoint; intros; split; intros H l; specialize (H l); tauto.
+by rewrite /hdisjoint=>??; split=>H l; case: (H l); try by [left|right].
 Qed.
 
 Program Definition hunion (h1 h2: heap) : heap :=
   {| contents := fun l => if h1 l then h1 l else h2 l |}.
 Next Obligation.
-  destruct (isfinite h1) as (i1 & fin1), (isfinite h2) as (i2 & fin2).
-  exists (Z.max i1 i2); intros. rewrite fin1, fin2 by lia. auto.
+case: (isfinite h1)=>[i1 F1].
+case: (isfinite h2)=>[i2 F2].
+exists (Order.max i1 i2)=>??.
+by rewrite F1 ?F2=>//; lia.
 Qed.
 
 Lemma hunion_comm:
   forall h1 h2, hdisjoint h1 h2 -> hunion h2 h1 = hunion h1 h2.
 Proof.
-  intros; apply heap_extensionality; intros; cbn.
-  specialize (H l). destruct (h1 l), (h2 l); intuition congruence.
+move=>h1 h2 H; apply: heap_extensionality=>l /=.
+by case: (H l)=>->/=; [case: (h2 l)| case: (h1 l)].
 Qed.
 
 Lemma hunion_assoc:
   forall h1 h2 h3, hunion (hunion h1 h2) h3 = hunion h1 (hunion h2 h3).
 Proof.
-  intros; apply heap_extensionality; intros; cbn. destruct (h1 l); auto.
+move=>h1 ??; apply: heap_extensionality=>l /=.
+by case: (h1 l).
 Qed.
 
 Lemma hunion_empty:
   forall h, hunion hempty h = h.
 Proof.
-  intros; apply heap_extensionality; intros; cbn. auto.
+by move=>?; apply: heap_extensionality.
+Qed.
+
+Lemma hdisjoint_empty:
+  forall h, hdisjoint h h -> h = hempty.
+Proof.
+move=>? H; apply: heap_extensionality=>l.
+by case: (H l)=>->.
 Qed.
 
 Lemma hdisjoint_union_l:
   forall h1 h2 h3,
   hdisjoint (hunion h1 h2) h3 <-> hdisjoint h1 h3 /\ hdisjoint h2 h3.
 Proof.
-  unfold hdisjoint, hunion; cbn; intros. split.
-- intros D; split; intros l; destruct (D l); auto; destruct (h1 l); auto.
-  discriminate.
-- intros [D1 D2] l. destruct (D2 l); auto. destruct (h1 l) eqn:H1; auto. destruct (D1 l); auto. congruence.
+rewrite /hdisjoint /hunion /= => h1 ??; split.
+- by move=>H; split=>l; case: (H l); try by [right]; case: (h1 l)=>//= ?; left.
+- move=>[H1 H2] l; case: (H2 l)=>->; case E: (h1 l)=>/=; [right|left|right|right]=>//.
+  by case: (H1 l)=>//; rewrite E.
 Qed.
 
 Lemma hdisjoint_union_r:
   forall h1 h2 h3,
   hdisjoint h1 (hunion h2 h3) <-> hdisjoint h1 h2 /\ hdisjoint h1 h3.
 Proof.
-  intros. rewrite hdisjoint_sym. rewrite hdisjoint_union_l. 
-  rewrite (hdisjoint_sym h2), (hdisjoint_sym h3). tauto.
+move=>? h2 h3.
+by rewrite hdisjoint_sym hdisjoint_union_l (hdisjoint_sym h2) (hdisjoint_sym h3).
 Qed.
 
 (** Disjointness between three heaps. *)
@@ -147,6 +167,7 @@ Definition hdisj3 (h1 h2 h3: heap) :=
 
 (** A tactic to prove disjointness statements. *)
 
+(*
 Ltac HDISJ :=
   match goal with
   | [ H: hdisj3 _ _ _ |- _ ] =>
@@ -169,24 +190,25 @@ Ltac HDISJ :=
       assumption || (apply hdisjoint_sym; assumption) || idtac
   | _ => idtac
   end.
-
+*)
 Lemma hunion_invert_r:
   forall h1 h2 h,
   hunion h h1 = hunion h h2 -> hdisjoint h h1 -> hdisjoint h h2 -> h1 = h2.
 Proof.
-  intros. apply heap_extensionality; intros l.
-  assert (hunion h h1 l = hunion h h2 l) by congruence.
-  cbn in H2. specialize (H0 l); specialize (H1 l). destruct (h l); intuition congruence.
+move=>h1 h2 h H H1 H2; apply: heap_extensionality=>l.
+have /= Hl : hunion h h1 l = hunion h h2 l by rewrite H.
+by case: (H1 l); case: (H2 l); move: Hl; case: (h l)=>// ??->->.
 Qed.
 
 Lemma hunion_invert_l:
   forall h1 h2 h,
   hunion h1 h = hunion h2 h -> hdisjoint h1 h -> hdisjoint h2 h -> h1 = h2.
 Proof.
-  intros. apply hunion_invert_r with h.
-  rewrite <- ! (hunion_comm h) by HDISJ. auto.
-  HDISJ. HDISJ.
-Qed. 
+move=>? h2  h ???; apply: (hunion_invert_r _ _ h).
+- by rewrite hunion_comm // [in RHS]hunion_comm.
+- by rewrite hdisjoint_sym.
+- by rewrite hdisjoint_sym.
+Qed.
 
 (** * 2. Assertions for separation logic *)
 
@@ -217,10 +239,10 @@ Definition emp : assertion :=
 Definition pure (P: Prop) : assertion :=
   fun h => P /\ h = hempty.
 
-(** The assertion "address [l] contains value [v]". 
+(** The assertion "address [l] contains value [v]".
     The domain of the heap must be the singleton [{l}]. *)
 
-Definition contains (l: addr) (v: Z) : assertion :=
+Definition contains (l: addr) (v: int) : assertion :=
   fun h => h = hupdate l v hempty.
 
 (** The assertion "address [l] is valid" (i.e. in the domain of the heap). *)
@@ -256,59 +278,57 @@ Lemma assertion_extensionality:
   forall (P Q: assertion),
   (forall h, P h <-> Q h) -> P = Q.
 Proof.
-  intros. apply functional_extensionality; intros h.
-  apply propositional_extensionality. auto.
+move=>?? H; apply: functional_extensionality=>?.
+by apply/propositional_extensionality/H.
 Qed.
 
 (** ** Properties of separating conjunction *)
 
 Lemma sepconj_comm: forall P Q, P ** Q = Q ** P.
 Proof.
-  assert (forall P Q h, (P ** Q) h -> (Q ** P) h).
-  { intros P Q h (h1 & h2 & P1 & Q2 & EQ & DISJ); subst h.
-    exists h2, h1; intuition auto.
-    apply hdisjoint_sym; auto.
-    symmetry; apply hunion_comm; auto. } 
-  intros; apply assertion_extensionality; intros; split; auto.
+have E : forall P Q h, (P ** Q) h -> (Q ** P) h.
+- move=>???[h1][h2][?][?][D]->.
+  have Ds : hdisjoint h2 h1 by rewrite hdisjoint_sym.
+  exists h2, h1; do!split=>//.
+  by rewrite hunion_comm.
+by move=>??; apply: assertion_extensionality=>?; split; apply: E.
 Qed.
 
 Lemma sepconj_assoc: forall P Q R, (P ** Q) ** R = P ** (Q ** R).
 Proof.
-  intros; apply assertion_extensionality; intros; split.
-- intros (hx & h3 & (h1 & h2 & P1 & Q2 & EQ & DISJ) & R3 & EQ' & DISJ'). subst hx h.
-  rewrite hdisjoint_union_l in EQ'. rewrite hunion_assoc.
-  exists h1, (hunion h2 h3); intuition auto.
-  exists h2, h3; intuition auto.
-  rewrite hdisjoint_union_r; tauto.
-- intros (h1 & hx & P1 & (h2 & h3 & Q2 & R3 & EQ & DISJ) & EQ' & DISJ'). subst hx h.
-  rewrite hdisjoint_union_r in EQ'. rewrite <- hunion_assoc.
-  exists (hunion h1 h2), h3; intuition auto.
-  exists h1, h2; intuition auto.
-  rewrite hdisjoint_union_l; tauto.
+move=>???; apply: assertion_extensionality=>?; split.
+- move=>[?][h1][[h2][h3][?][?][?]->][?][D]->.
+  rewrite hunion_assoc.
+  move: D; rewrite hdisjoint_union_l; case=>??.
+  by exists h2, (hunion h3 h1); do!split=>//; [exists h3, h1|rewrite hdisjoint_union_r].
+move=>[h1][?][?][[h2][h3][?][?][?]->][D]->.
+rewrite -hunion_assoc.
+move: D; rewrite hdisjoint_union_r; case=>??.
+by exists (hunion h1 h2), h3; do!split=>//; [exists h1, h2|rewrite hdisjoint_union_l].
 Qed.
 
 Lemma sepconj_emp: forall P, emp ** P = P.
 Proof.
-  intros; apply assertion_extensionality; intros; split.
-- intros (h1 & h2 & EMP1 & P2 & EQ & DISJ). red in EMP1. subst h h1.
-  rewrite hunion_empty; auto.
-- intros. exists hempty, h; intuition auto. 
-  red; auto.
-  red; auto.
-  rewrite hunion_empty; auto.
+move=>?; apply: assertion_extensionality=>h; split.
+- move=>[?][?][HE][?][?]->; rewrite /emp in HE.
+  by rewrite HE hunion_empty.
+- by move=>?; exists hempty, h; do!split=>//; [move=>?; left | rewrite hunion_empty].
 Qed.
 
 Lemma sepconj_imp_l: forall P Q R,
   (P -->> Q) -> (P ** R -->> Q ** R).
 Proof.
-  intros P Q R IMP h (h1 & h2 & P1 & Q2 & D & U).
-  exists h1, h2; intuition auto.
+move=>??? H ?[h1][h2][?][?][?]->.
+exists h1, h2; do!split=>//.
+by apply: H.
 Qed.
 
 Lemma sepconj_imp_r: forall P Q R,
   (P -->> Q) -> (R ** P -->> R ** Q).
 Proof.
-  intros. rewrite ! (sepconj_comm R). apply sepconj_imp_l; auto.
+move=>?? R ??.
+rewrite 2!(sepconj_comm R).
+by apply: sepconj_imp_l.
 Qed.
 
 (** ** Other useful logical properties *)
@@ -316,60 +336,57 @@ Qed.
 Lemma pure_sep: forall P Q,
   pure (P /\ Q) = pure P ** pure Q.
 Proof.
-  intros. apply assertion_extensionality; intros.
-  unfold pure, sepconj. split.
-- intros ((A & B) & C). subst h. exists hempty, hempty; intuition auto.
-  intro; auto.
-  rewrite hunion_empty; auto.
-- intros (h1 & h2 & (PP & E1) & (QQ & E2) & C & D).
-  subst. rewrite hunion_empty; auto.
+move=>??; apply: assertion_extensionality=>?.
+rewrite /pure /sepconj; split.
+- by move=>[[??]]->; exists hempty, hempty; do!split=>//; [left | rewrite hunion_empty].
+- move=>[?][?][[? ->]][[? ->]][_]->; do!split=>//.
+  by rewrite hunion_empty.
 Qed.
 
 Lemma pureconj_sepconj: forall P Q,
   pure P ** Q = P //\\ Q.
 Proof.
-  intros. apply assertion_extensionality; intros.
-  unfold pure, sepconj, pureconj; split.
-- intros (h1 & h2 & (A & B) & C & D & E).
-  split. auto. subst. rewrite hunion_empty. auto.
-- intros (A & B). exists hempty, h; intuition auto.  
-  intro l. auto.
-  rewrite hunion_empty; auto.
+move=>??; apply: assertion_extensionality=>h.
+rewrite /pure /sepconj /pureconj; split.
+- move=>[?][?][[? ->]][?][?]->.
+  by rewrite hunion_empty.
+- by move=>[??]; exists hempty, h; do!split=>//; [left | rewrite hunion_empty].
 Qed.
 
 Lemma lift_pureconj: forall P Q R, (P //\\ Q) ** R = P //\\ (Q ** R).
 Proof.
-  intros. rewrite <- ! pureconj_sepconj. rewrite sepconj_assoc. auto.
+by move=>???; rewrite -2!pureconj_sepconj sepconj_assoc.
 Qed.
 
 Lemma lift_aexists: forall (A: Type) (P: A -> assertion) Q,
   aexists P ** Q = aexists (fun x => P x ** Q).
 Proof.
-  intros; apply assertion_extensionality; intros; split.
-- intros (h1 & h2 & (a & P1) & Q2 & DISJ & EQ).
-  exists a, h1, h2; auto.
-- intros (a & h1 & h2 & P1 & Q2 & DISJ & EQ).
-  exists h1, h2; intuition auto. exists a; auto.
+move=>???; apply: assertion_extensionality=>?; split.
+- move=>[h1][h2][[a ?]][?][?]->.
+  by exists a,h1,h2.
+- move=>[a][h1][h2][?][?][?]->.
+  exists h1,h2; do!split=>//.
+  by exists a.
 Qed.
 
 Lemma sepconj_swap3: forall R P Q, P ** Q ** R = R ** P ** Q.
 Proof.
-  intros. rewrite <- sepconj_assoc, sepconj_comm. auto.
-Qed. 
+by move=>???; rewrite -sepconj_assoc sepconj_comm.
+Qed.
 
 Lemma sepconj_swap4: forall S P Q R, P ** Q ** R ** S = S ** P ** Q ** R.
 Proof.
-  intros. rewrite <- sepconj_assoc, sepconj_swap3, sepconj_assoc. auto.
-Qed. 
+by move=>????; rewrite -sepconj_assoc sepconj_swap3 sepconj_assoc.
+Qed.
 
 Lemma sepconj_pick2: forall Q P R, P ** Q ** R = Q ** P ** R.
 Proof.
-  intros. rewrite (sepconj_comm Q), <- sepconj_assoc, sepconj_comm. auto.
-Qed. 
+by move=>Q ??; rewrite (sepconj_comm Q) -sepconj_assoc sepconj_comm.
+Qed.
 
 Lemma sepconj_pick3: forall R P Q S, P ** Q ** R ** S = R ** P ** Q ** S.
 Proof.
-  intros. rewrite (sepconj_pick2 R), (sepconj_pick2 P). auto. 
+by move=>R P ??; rewrite (sepconj_pick2 R) (sepconj_pick2 P).
 Qed.
 
 (** ** Magic wand *)
@@ -382,80 +399,92 @@ Notation "P --* Q" := (wand P Q) (at level 70, right associativity).
 Lemma wand_intro: forall P Q R,
   P ** Q -->> R  ->  P -->> Q --* R.
 Proof.
-  intros P Q R IMP h Ph h' DISJ Qh'.
-  apply IMP. exists h, h'; auto.
+move=>??? I h1 ? h2 ??.
+by apply: I; exists h1,h2.
 Qed.
 
 Lemma wand_cancel: forall P Q,
   P ** (P --* Q) -->> Q.
 Proof.
-  intros P Q h (h1 & h2 & Ph1 & Wh2 & D & U). subst h.
-  assert (D': hdisjoint h2 h1) by (apply hdisjoint_sym; auto).
-  rewrite hunion_comm by auto. apply Wh2; auto.
+move=>???[h1][h2][?][WH][?]->.
+have D: hdisjoint h2 h1 by rewrite hdisjoint_sym.
+rewrite hunion_comm //.
+by apply: WH.
 Qed.
 
 Lemma wand_charact: forall P Q,
   (P --*Q) = (aexists (fun R => (P ** R -->> Q) //\\ R)).
 Proof.
-  intros P Q; apply assertion_extensionality; intros h; split.
-- intros W. exists (P --* Q). split; auto. apply wand_cancel.
-- intros (R & A & B) h' D Ph'.
-  assert (D': hdisjoint h' h) by (apply hdisjoint_sym; auto).
-  rewrite hunion_comm by auto. apply A. exists h', h; auto.
+move=>P Q; apply assertion_extensionality=>h; split.
+- move=>?; exists (P --* Q); split=>//.
+  by apply: wand_cancel.
+- move=>[?][A]? h1 ??.
+  have D: hdisjoint h1 h by rewrite hdisjoint_sym.
+  rewrite hunion_comm //.
+  by apply: A; exists h1,h.
 Qed.
 
 Lemma wand_equiv: forall P Q R,
   (P -->> (Q --* R)) <-> (P ** Q -->> R).
 Proof.
-  intros; split; intros H.
-- intros h (h1 & h2 & Ph1 & Wh2 & D & U). subst h.
-  apply H; auto.
-- apply wand_intro; auto.
+move=>???; split=>H.
+- move=>?[?][?][?][?][?]->.
+  by apply: H.
+- by apply: wand_intro.
 Qed.
 
 Lemma wand_imp_l: forall P P' Q,
   (P' -->> P) -> (P --* Q -->> P' --* Q).
 Proof.
-  intros. intros h W h' DISJ P'h'. apply W; auto.
+by move=>??? H ? W ???; apply/W/H.
 Qed.
 
 Lemma wand_imp_r: forall P Q Q',
   (Q -->> Q') -> (P --* Q -->> P --* Q').
 Proof.
-  intros. intros h W h' DISJ Ph'. apply H; apply W; auto.
+by move=>??? H ? W ???; apply/H/W.
 Qed.
 
 Lemma wand_idem: forall P,
   emp -->> P --* P.
 Proof.
-  intros P h E. rewrite E. red. intros. rewrite hunion_empty. auto.
+by move=>?? -> ???; rewrite hunion_empty.
 Qed.
 
 Lemma wand_pure_l: forall (P: Prop) Q,
   P -> (pure P --* Q) = Q.
 Proof.
-  intros P Q PP. apply assertion_extensionality. intros h; split.
-- intros W. rewrite <- hunion_empty, hunion_comm by HDISJ. apply W. HDISJ. split; auto.
-- intros Qh h' DISJ (Ph' & E). subst h'. rewrite hunion_comm, hunion_empty by HDISJ. auto.
+move=>???; apply assertion_extensionality=>h; split.
+- have HE: hdisjoint h hempty by right.
+  move=>W; rewrite -(hunion_empty h) hunion_comm //.
+  by apply: W.
+- move=>???[?->]; rewrite hunion_comm; last by left.
+  by rewrite hunion_empty.
 Qed.
 
 Lemma wand_curry: forall P Q R,
   (P ** Q --* R) = (P --* Q --* R).
 Proof.
-  intros; apply assertion_extensionality; intros h; split.
-- intros W h1 D1 Ph1 h2 D2 Qh2. rewrite hunion_assoc. apply W. HDISJ. exists h1, h2; intuition auto. HDISJ.
-- intros W h' D (h1 & h2 & Ph1 & Qh2 & D12 & U12). subst h'.
-  rewrite <- hunion_assoc. apply W. HDISJ. auto. HDISJ. auto.
+move=>???; apply assertion_extensionality=>?; split.
+- move=>W h1 ?? h2; rewrite hdisjoint_union_l; case=>???.
+  rewrite hunion_assoc; apply: W; last by exists h1, h2.
+  rewrite hunion_comm; last by rewrite hdisjoint_sym.
+  by rewrite hdisjoint_union_r.
+move=>W ? H[?][?][?][?][?]E.
+rewrite {}E in H *; move: H; rewrite hdisjoint_union_r; case=>??.
+rewrite -hunion_assoc; apply: W=>//.
+by rewrite hdisjoint_union_l.
 Qed.
 
 Lemma wand_star: forall P Q R,
   ((P --* Q) ** R ) -->> (P --* (Q ** R)).
 Proof.
-  intros; intros h (h1 & h2 & W1 & R2 & D & U). subst h. intros h' D' Ph'.
-  exists (hunion h1 h'), h2; intuition auto.
-  apply W1; auto. HDISJ.
-  HDISJ.
-  rewrite ! hunion_assoc. f_equal. apply hunion_comm. HDISJ.
+move=>????[h1][h2][W][?][?]-> h3; rewrite hdisjoint_union_l; case=>???.
+exists (hunion h1 h3),h2; do!split=>//.
+- by apply: W.
+- rewrite hdisjoint_union_l; split=>//.
+  by rewrite hdisjoint_sym.
+by rewrite !hunion_assoc (hunion_comm h3) // hdisjoint_sym.
 Qed.
 
 (** ** Precise assertions *)
@@ -480,85 +509,89 @@ Remark param_precise_precise:
   forall (X: Type) (P: X -> assertion),
   param_precise P -> forall x, precise (P x).
 Proof.
-  intros; red; intros. edestruct (H x x h1 h2 h1' h2'); eauto.
+move=>?? H x h1 h2 h1' h2' ?????.
+by case: (H x x h1 h2 h1' h2').
 Qed.
 
 Remark precise_param_precise:
   forall P, precise P -> param_precise (fun _ : unit => P).
 Proof.
-  intros; red; intros. split. destruct x1, x2; auto. eauto.
+move=>? H [] [] ?????????; split=>//.
+by apply: H.
 Qed.
 
 Lemma pure_precise: forall P,
   precise (pure P).
 Proof.
-  unfold pure; intros; red; intros. destruct H2, H3. congruence.
+by move=>????????[?->][?->].
 Qed.
 
 Lemma pure_param_precise: forall (X: Type) (P: X -> Prop),
   (forall x1 x2, P x1 -> P x2 -> x1 = x2) ->
   param_precise (fun x => pure (P x)).
 Proof.
-  unfold pure; intros; red; intros. destruct H3, H4. split. auto. congruence.
-Qed. 
+move=>?? H ?????????[?->][?->]; split=>//.
+by apply: H.
+Qed.
 
 Lemma contains_param_precise: forall l,
   param_precise (fun v => contains l v).
 Proof.
-  unfold contains; intros; red; intros.
-  assert (E: hunion h1 h2 l = hunion h1' h2' l) by congruence.
-  cbn in E. subst h1 h1'. rewrite ! hupdate_same in E.
-  replace x2 with x1 by congruence. auto.
+rewrite /contains=>l ?? h1 h2 h1' h2' H1 H2 HD E1 E2.
+have /= E: hunion h1 h2 l = hunion h1' h2' l by rewrite HD.
+by rewrite E1 E2 !hupdate_same /= in E *; case: E=>->.
 Qed.
 
 Lemma contains_precise: forall l v,
   precise (contains l v).
 Proof.
-  intros. apply param_precise_precise. apply contains_param_precise.
+move=>l v ?????????.
+apply: (param_precise_precise _ (contains l) _ v)=>//.
+by exact: contains_param_precise.
 Qed.
 
 Lemma aexists_precise: forall (X: Type) (P: X -> assertion),
   param_precise P -> precise (aexists P).
 Proof.
-  intros; red; intros. destruct H3 as (x1 & P1), H4 as (x2 & P2).
-  eapply H; eauto.
+move=>?? H h1 h2 h1' h2' ???[x1 ?][x2 ?].
+by case: (H x1 x2 h1 h2 h1' h2').
 Qed.
 
 Lemma valid_precise: forall l,
   precise (valid l).
 Proof.
-  intros. apply aexists_precise. apply contains_param_precise.
+move=>l ? h2 ? h2' ?????.
+apply: (aexists_precise _ (contains l) _ _ h2 _ h2')=>//.
+by exact: contains_param_precise.
 Qed.
 
 Lemma sepconj_param_precise: forall (X: Type) (P Q: X -> assertion),
   param_precise P -> (forall x, precise (Q x)) ->
   param_precise (fun x => P x ** Q x).
 Proof.
-  intros; red; intros. 
-  destruct H4 as (h3 & h4 & P3 & Q4 & D & E). 
-  destruct H5 as (h3' & h4' & P3' & Q4' & D' & E').
-  subst h1 h1'.
-  assert (x1 = x2 /\ h3 = h3'). 
-  { apply H with (hunion h4 h2) (hunion h4' h2'); auto. HDISJ. HDISJ. 
-    rewrite <- ! hunion_assoc. auto. }
-  destruct H4. subst x2.
-  assert (h4 = h4').
-  { apply (H0 x1) with (hunion h3 h2) (hunion h3' h2'); auto. HDISJ. HDISJ.
-    rewrite <- ! hunion_assoc.
-    rewrite (hunion_comm h3) by HDISJ.
-    rewrite (hunion_comm h3') by HDISJ.
-    auto.
-  }
-  subst; auto.
+move=>??? H H0 x1 x2 ? h2 ? h2' HD1 HD2 H12 [h3][h4][?][?][?] E1 [h5][h6][?][?][?] E2.
+rewrite {}E1 {}E2 in HD1 HD2 H12 *.
+case: (H x1 x2 h3 (hunion h4 h2) h5 (hunion h6 h2'))=>//.
+- by move: HD1; rewrite hdisjoint_union_r hdisjoint_union_l; case.
+- by move: HD2; rewrite hdisjoint_union_r hdisjoint_union_l; case.
+- by rewrite -!hunion_assoc.
+move=>EX ->; split=>//.
+rewrite (H0 x1 h4 (hunion h3 h2) h6 (hunion h5 h2')) //.
+- move: HD1; rewrite hdisjoint_union_r hdisjoint_union_l; case=>_; split=>//.
+  by rewrite hdisjoint_sym.
+- move: HD2; rewrite hdisjoint_union_r hdisjoint_union_l; case=>_; split=>//.
+  by rewrite hdisjoint_sym.
+- by rewrite -!hunion_assoc (hunion_comm h3) // (hunion_comm h5).
+by rewrite EX.
 Qed.
 
 Lemma sepconj_precise: forall P Q,
   precise P -> precise Q -> precise (P ** Q).
 Proof.
-  intros.
-  assert (param_precise (fun _ : unit => P ** Q)).
-  { apply sepconj_param_precise. apply precise_param_precise; auto. auto. }
-  apply param_precise_precise in H1. auto. exact tt.
+move=>P Q ???????????.
+have HP: param_precise (fun _ : unit => P ** Q)
+ by apply: sepconj_param_precise=>//; apply precise_param_precise.
+by move/param_precise_precise: HP; apply.
 Qed.
 
 (** Distributivity laws for precise assertions. *)
@@ -566,23 +599,26 @@ Qed.
 Lemma sepconj_and_distr_1: forall P1 P2 Q,
   aand P1 P2 ** Q -->> aand (P1 ** Q) (P2 ** Q).
 Proof.
-  intros P1 P2 Q h (h1 & h2 & (P11 & P21) & Q2 & D & E); split; exists h1, h2; auto.
+by move=>????[h1][h2][[? ?]][?][?]->; split; exists h1, h2.
 Qed.
 
 Lemma sepconj_and_distr_2: forall P1 P2 Q,
   precise Q ->
   aand (P1 ** Q) (P2 ** Q) -->> aand P1 P2 ** Q.
 Proof.
-  intros P1 P2 Q PQ.
-  rewrite (sepconj_comm P1), (sepconj_comm P2). 
-  intros h ((h1 & h2 & Q1 & P12 & D & E) & (h1' & h2' & Q1' & P22 & D' & E')).
-  assert (h1 = h1').
-  { apply PQ with h2 h2'; auto. HDISJ. HDISJ. congruence. }
-  subst h1'.
-  assert (h2 = h2').
-  { apply hunion_invert_r with h1; auto; congruence. }
-  subst h2'.
-  unfold aand; exists h2, h1; intuition auto. HDISJ. rewrite hunion_comm by HDISJ; auto.
+move=>P1 P2 ? PQ.
+rewrite (sepconj_comm P1) (sepconj_comm P2)=>?[[h1][h2][?][?][?]E1][h3][h4][?][?][?]E2.
+have E3: h1 = h3.
+- apply: (PQ _ h2 _ h4)=>//.
+  by rewrite -E1 -E2.
+have E4: h2 = h4.
+- apply: (hunion_invert_r _ _ h1)=>//.
+  - by rewrite -E1 E3 -E2.
+  by rewrite E3.
+exists h2, h1; do!split=>//.
+- by rewrite E4.
+- by rewrite hdisjoint_sym.
+- by rewrite hunion_comm.
 Qed.
 
 (** Self-conjunction law for precise assertions. *)
@@ -591,9 +627,11 @@ Lemma sepconj_self: forall P,
   precise P ->
   P ** P -->> P.
 Proof.
-  intros. intros h (h1 & h2 & P1 & P2 & D & E).
-  assert (h1 = h2). { apply H with h2 h1; auto. HDISJ. apply hunion_comm; HDISJ. }
-  subst h2.
-  assert (h = h1). { apply heap_extensionality; intros l. rewrite E; cbn. destruct (h1 l); auto. }
-  congruence.
+move=>? H ?[h1][h2][?][?][?]->.
+have D: hdisjoint h2 h1 by rewrite hdisjoint_sym.
+have E1: h1 = h2.
+- apply: (H _ h2 _ h1)=>//.
+  by rewrite hunion_comm.
+rewrite -E1 in D; move/hdisjoint_empty: D=>->.
+by rewrite hunion_empty.
 Qed.
