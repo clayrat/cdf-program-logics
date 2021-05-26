@@ -1,10 +1,18 @@
 (** Separation logic. *)
 
+From Coq Require Import ssreflect ssrfun ssrbool Lia FunctionalExtensionality PropExtensionality.
+From mathcomp Require Import ssrint ssrnum ssralg seq eqtype order zify.
+From CDF Require Import Sequences Separation.
+Import Order.Theory.
+Local Open Scope ring_scope.
+
+(*
 From Coq Require Import ZArith Lia Bool List Program.Equality.
 From Coq Require Import FunctionalExtensionality PropExtensionality.
 From CDF Require Import Sequences Separation.
 
 Local Open Scope Z_scope.
+*)
 
 (** * 1. A language of pointers *)
 
@@ -19,7 +27,7 @@ Local Open Scope Z_scope.
 
 (** We use higher-order abstract syntax to represent commands in this
     language.  With first-order abstract syntax, a "let" binding
-    [let x = a in b] would be represented using the constructor 
+    [let x = a in b] would be represented using the constructor
 <<
     LET: forall (x: ident) (a b: com), com
 >>
@@ -34,14 +42,17 @@ Local Open Scope Z_scope.
 *)
 
 CoInductive com: Type :=
-  | PURE (x: Z)                         (**r command without effects *)
-  | LET (c: com) (f: Z -> com)          (**r sequencing of commands *)
-  | IFTHENELSE (b: Z) (c1 c2: com)      (**r conditional *)
+  | PURE (x: int)                       (**r command without effects *)
+  | LET (c: com) (f: int -> com)        (**r sequencing of commands *)
+  | IFTHENELSE (b: int) (c1 c2: com)    (**r conditional *)
   | ALLOC (sz: nat)                     (**r allocate [sz] words of storage *)
   | GET (l: addr)                       (**r dereference a pointer *)
-  | SET (l: addr) (v: Z)                (**r assign through a pointer *)
+  | SET (l: addr) (v: int)              (**r assign through a pointer *)
   | FREE (l: addr)                      (**r free one word of storage *)
-  | PICK (n: Z).                        (**r pick a number between 0 and [n] *)
+  | PICK (n: int).                      (**r pick a number between 0 and [n] *)
+
+Definition not_pure (c : com) :=
+  match c with PURE _ => false | _ => true end.
 
 (** Some derived forms. *)
 
@@ -63,9 +74,9 @@ Inductive red: com * heap -> com * heap -> Prop :=
       red (c, h) (c', h') ->
       red (LET c f, h) (LET c' f, h')
   | red_ifthenelse: forall b c1 c2 h,
-      red (IFTHENELSE b c1 c2, h) ((if b =? 0 then c2 else c1), h)
+      red (IFTHENELSE b c1 c2, h) (if b == 0 then c2 else c1, h)
   | red_alloc: forall sz (h: heap) l,
-      (forall i, l <= i < l + Z.of_nat sz -> h i = None) ->
+      (forall i, l <= i < l + Posz sz -> h i = None) ->
       l <> 0 ->
       red (ALLOC sz, h) (PURE l, hinit l sz h)
   | red_get: forall l (h: heap) v,
@@ -79,7 +90,7 @@ Inductive red: com * heap -> com * heap -> Prop :=
       red (FREE l, h) (SKIP, hfree l h).
 
 (** Absence of run-time errors. [immsafe c h] holds if [c / h] is not
-    going to abort immediately on a run-time error, such as dereferencing 
+    going to abort immediately on a run-time error, such as dereferencing
     an invalid pointer. *)
 
 Inductive immsafe: com * heap -> Prop :=
@@ -89,8 +100,8 @@ Inductive immsafe: com * heap -> Prop :=
       immsafe (c, h) -> immsafe (LET c f, h)
   | immsafe_ifthenelse: forall b c1 c2 h,
       immsafe (IFTHENELSE b c1 c2, h)
-  | immsafe_alloc: forall sz (h: heap) l,
-      l <> 0 -> (forall i, l <= i < l + Z.of_nat sz -> h i = None) ->
+  | immsafe_alloc: forall (sz : nat) (h: heap) l,
+      l <> 0 -> (forall i, l <= i < l + Posz sz -> h i = None) ->
       immsafe (ALLOC sz, h)
   | immsafe_get: forall l (h: heap),
       h l <> None -> immsafe (GET l, h)
@@ -104,7 +115,7 @@ Inductive immsafe: com * heap -> Prop :=
 (** * 2.  The rules of separation logic *)
 
 Definition precond := assertion.
-Definition postcond := Z -> assertion.
+Definition postcond := int -> assertion.
 
 (** ** 2.1.  Semantic definition of strong triples *)
 
@@ -129,7 +140,7 @@ Inductive safe: com -> heap -> postcond -> Prop :=
       Q v h ->
       safe (PURE v) h Q
   | safe_step: forall c h Q,
-      match c with PURE _ => False | _ => True end ->
+      not_pure c ->
       immsafe (c, h) ->
       (forall c' h', red (c, h) (c', h') -> safe c' h' Q) ->
       safe c h Q.
@@ -148,23 +159,24 @@ Notation "⦃ P ⦄ c ⦃ Q ⦄" := (triple P c Q) (at level 90, c at next level
     in a small heap, it is safe in a bigger heap, and any reduction
     from the bigger heap is simulated by a reduction from the smaller heap. *)
 
-Ltac inv H := inversion H; clear H; subst.
+(* generalizing the following two seems a bit too tedious, so I fall back to depind *)
+
+From Coq Require Import Program.Equality.
 
 Lemma immsafe_frame: forall h' c h,
   immsafe (c, h) -> hdisjoint h h' -> immsafe (c, hunion h h').
 Proof.
-  intros h' c h IMM; dependent induction IMM; intros DISJ.
-- constructor.
-- constructor; auto.
-- constructor.
-- destruct (isfinite (hunion h h')) as [l' FIN].
-  apply immsafe_alloc with (Z.max 1 l').
-  lia.
-  intros. apply FIN. lia.
-- constructor. cbn. destruct (h l); congruence. 
-- constructor. cbn. destruct (h l); congruence. 
-- constructor. cbn. destruct (h l); congruence. 
-- constructor.
+move=>h' ? h H; dependent induction H=>?.
+- by exact: immsafe_pure.
+- by apply/immsafe_let/IHimmsafe.
+- by exact: immsafe_ifthenelse.
+- case: (isfinite (hunion h h')) => [m Fm].
+  apply: (immsafe_alloc _ _ (Num.max 1 m)); first by lia.
+  by move=>??; apply: Fm; lia.
+- by apply: immsafe_get=>/=; case E: (h l).
+- by apply: immsafe_set=>/=; case E: (h l).
+- by apply: immsafe_free=>/=; case E: (h l).
+- by exact: immsafe_pick.
 Qed.
 
 Lemma red_frame: forall h2 c h1 c' h',
@@ -173,38 +185,46 @@ Lemma red_frame: forall h2 c h1 c' h',
   hdisjoint h1 h2 ->
   exists h1', red (c, h1) (c', h1') /\ hdisjoint h1' h2 /\ h' = hunion h1' h2.
 Proof.
-  intros until h'; intros RED; dependent induction RED; intros IMM DISJ; inv IMM.
-- exists h1; intuition auto. constructor; auto.
-- exists h1; intuition auto. constructor; auto.
-- edestruct IHRED as (h1' & R & D & U); eauto.
-  exists h1'; intuition auto. constructor; auto.
-- exists h1; intuition auto. constructor; auto.
-- exists (hinit l sz h1); intuition auto.
-  + constructor; auto. intros. apply H in H1. cbn in H1. destruct (h1 i); congruence.
-  + red; cbn; intros i.
-    assert (EITHER: l <= i < l + Z.of_nat sz \/ (i < l \/ l + Z.of_nat sz <= i)) by lia.
-    destruct EITHER.
-    * right. apply H in H1. cbn in H1. destruct (h1 i), (h2 i); congruence.
-    * rewrite hinit_outside by auto. apply DISJ.
-  + apply heap_extensionality; intros i; cbn.
-    assert (EITHER: l <= i < l + Z.of_nat sz \/ (i < l \/ l + Z.of_nat sz <= i)) by lia.
-    destruct EITHER.
-    * rewrite ! hinit_inside by auto. auto.
-    * rewrite ! hinit_outside by auto. auto.
-- exists h1; intuition auto. constructor; auto. cbn in H. destruct (h1 l); congruence.
-- exists (hupdate l v h1); intuition auto.
-  + constructor; auto.
-  + intros i; cbn. generalize (DISJ i). 
-    destruct (Z.eq_dec l i); intuition congruence.
-  + apply heap_extensionality; intros i; cbn.
-    destruct (Z.eq_dec l i); auto.
-- exists (hfree l h1); intuition auto.
-  + constructor; auto.
-  + intros i; cbn. generalize (DISJ i). 
-    destruct (Z.eq_dec l i); intuition congruence.
-  + apply heap_extensionality; intros i; cbn.
-    destruct (Z.eq_dec l i); auto.
-    subst i. generalize (DISJ l). intuition.
+move=>h2 ? h1 ? h' R; dependent induction R => I HD.
+- case: {-2}_ / I (erefl (PICK n, h1))=>// ??; case=>->->.
+  by exists h1; do!split=>//; exact: red_pick.
+- case: {-2}_ / I (erefl (LET (PURE x) f, h1))=>// ??? I; case=>EC -> EH; rewrite {}EC {}EH in I *.
+  by exists h1; do!split=>//; exact: red_let_done.
+- case: {-2}_ / I (erefl (LET c f, h1))=>// c0 ?? I; case=>EC -> EH; rewrite {}EC {}EH in I IHR *.
+  case: (IHR h2 c h1 c' h')=>// h3[?][?]?.
+  by exists h3; do!split=>//; apply: red_let_step.
+- by exists h1; do!split=>//; exact: red_ifthenelse.
+- exists (hinit l sz h1); do!split.
+  - by apply: red_alloc=>// i LE; move: (H i LE) => /=; case: (h1 i).
+  - move=>i.
+    have E: l <= i < l + sz%Z \/ (i < l \/ l + sz%Z <= i) by lia.
+    case: E.
+    - by move=>E; right; move: (H i E)=>/=; case: (h1 i).
+    - by move=>?; rewrite hinit_outside.
+  apply: heap_extensionality=>i /=.
+  have E: l <= i < l + sz%Z \/ (i < l \/ l + sz%Z <= i) by lia.
+  case: E=>?.
+  - by rewrite !hinit_inside.
+  - by rewrite !hinit_outside.
+- case: {-2}_ / I (erefl (GET l, h1))=>// ?? EQ; case=>EL EH; rewrite {}EL {}EH in EQ *.
+  exists h1; do!split=>//; apply: red_get.
+  by move: H=>/=; case E: (h1 l).
+- case: {-2}_ / I (erefl (SET l v, h1))=>// ??? EQ; case=>EL -> EH; rewrite {}EL {}EH in EQ *.
+  exists (hupdate l v h1); do!split.
+  - by apply: red_set.
+  - move=>i; move: (HD i)=>/=; case=>?; try by right.
+    case: eqP; try by left.
+    by move=>E; rewrite E in EQ.
+  apply: heap_extensionality=>i /=.
+  by case: eqP.
+- case: {-2}_ / I (erefl (FREE l, h1))=>// ?? EQ; case=>EL EH; rewrite {}EL {}EH in EQ *.
+  exists (hfree l h1); do!split.
+  - by apply: red_free.
+  - move=>i; move: (HD i)=>/=; case=>?; [left| right]=>//.
+    by case: eqP.
+  apply: heap_extensionality=>i /=.
+  case: eqP=>//= <-.
+  by case: (HD l).
 Qed.
 
 Lemma safe_frame:
@@ -212,19 +232,21 @@ Lemma safe_frame:
   forall c h Q,
   safe c h Q -> hdisjoint h h' -> safe c (hunion h h') (fun v => Q v ** R).
 Proof.
-  induction 2; intros DISJ.
-- constructor. exists h, h'; auto.
-- constructor. auto. apply immsafe_frame; auto. 
-  intros. edestruct red_frame as (h1' & RED1 & D & U); eauto. subst h'0.
-  apply H3; auto.
+move=>? h' ????; elim.
+- move=>? h1 ???; apply: safe_done.
+  by exists h1, h'.
+- move=>?????? H3 ?; apply: safe_step=>//; first by apply: immsafe_frame.
+  move=>?? R; case: (red_frame _ _ _ _ _ R)=>// ?[?][?] EQ0; rewrite {}EQ0 in R *.
+  by apply: H3.
 Qed.
 
 Lemma triple_frame: forall P c Q R,
   ⦃ P ⦄ c ⦃ Q ⦄ ->
   ⦃ P ** R ⦄ c ⦃ fun v => Q v ** R ⦄.
 Proof.
-  intros P c Q R TR h (h1 & h2 & P1 & R2 & D & U). subst h.
-  apply safe_frame; auto.
+move=>???? H ?[?][?][?][?][?]->.
+apply: safe_frame=>//.
+by apply: H.
 Qed.
 
 (** ** 2.3. The "small rules" for heap operations *)
@@ -232,26 +254,29 @@ Qed.
 Lemma triple_get: forall l v,
   ⦃ contains l v ⦄ GET l ⦃ fun v' => (v' = v) //\\ contains l v ⦄.
 Proof.
-  intros l v h P.
-  assert (L: h l = Some v).
-  { red in P. subst h. apply hupdate_same. }
-  constructor; auto.
-  - constructor. congruence.
-  - intros c' h' RED. inv RED. constructor. split; auto; congruence.
+move=>l v h P.
+have L: h l = Some v by rewrite P hupdate_same.
+apply: safe_step=>//.
+- by apply: immsafe_get; rewrite L.
+move=>c' h' R.
+case: {-2}_ {-1}_ / R (erefl (GET l, h)) (erefl (c', h'))=>// ??? E.
+case=>EL EH; case=>->->; rewrite {}EL {}EH in E *; rewrite {}E in L; case: L=>->.
+by apply: safe_done.
 Qed.
 
 Lemma triple_set: forall l v,
   ⦃ valid l ⦄ SET l v ⦃ fun _ => contains l v ⦄.
 Proof.
-  intros l v h (v0 & P).
-  assert (L: h l = Some v0).
-  { red in P; subst h; apply hupdate_same. }
-  constructor; auto.
-  - constructor. congruence.
-  - intros c' h' RED. inv RED. constructor.
-    red in P; subst h.
-    red. apply heap_extensionality; intros l'; cbn.
-    destruct (Z.eq_dec l l'); auto.
+move=>l v h [v0 P].
+have L: h l = Some v0 by rewrite P /= eq_refl.
+apply: safe_step=>//.
+- by apply: immsafe_set; rewrite L.
+move=>c' h' R.
+case: {-2}_ {-1}_ / R (erefl (SET l v, h)) (erefl (c', h'))=>// ??? E.
+case=>EL -> EH; case=>->->; rewrite {}EL {}EH in E *.
+apply: safe_done; rewrite P.
+apply: heap_extensionality=>? /=.
+by case: eqP.
 Qed.
 
 Fixpoint valid_N (l: addr) (sz: nat) : assertion :=
@@ -260,42 +285,45 @@ Fixpoint valid_N (l: addr) (sz: nat) : assertion :=
 Remark valid_N_init: forall sz l,
   (valid_N l sz) (hinit l sz hempty).
 Proof.
-  induction sz as [ | sz]; intros l; cbn.
-- red; auto.
-- exists (hupdate l 0 hempty), (hinit (l + 1) sz hempty); intuition auto.
-  + exists 0. red; auto.
-  + intros x. unfold hupdate, hempty; cbn. destruct (Z.eq_dec l x); auto.
-  right. rewrite hinit_outside by lia. auto.
-  + apply heap_extensionality; intros x. cbn. destruct (Z.eq_dec l x); auto.
-Qed. 
+elim=>/=.
+- by rewrite /emp.
+- move=>sz ? l.
+  exists (hupdate l 0 hempty), (hinit (l + 1) sz hempty); do!split=>//.
+  - by exists 0.
+  - move=>? /=; case: eqP=>E; [right|left]=>//.
+    by rewrite -E hinit_outside //; lia.
+  by apply: heap_extensionality=>? /=; case: eqP.
+Qed.
 
 Lemma triple_alloc: forall sz,
   ⦃ emp ⦄
   ALLOC sz
   ⦃ fun l => (l <> 0) //\\ valid_N l sz ⦄.
 Proof.
-  intros sz h P. red in P. subst h.
-  constructor; auto.
-- apply immsafe_alloc with 1; intros.
-  + lia.
-  + auto.
-- intros c' h' RED; inv RED. constructor.
-  split; auto. apply valid_N_init; auto.
-Qed. 
+move=>sz ?->.
+apply: safe_step=>//.
+- by apply: (immsafe_alloc _ _ 1).
+move=>c' h' R.
+case: {-2}_ {-1}_ / R (erefl (ALLOC sz, hempty)) (erefl (c', h'))=>// ??? H ?.
+case=>ES EH; case=>->->; rewrite {}ES {}EH in H *.
+apply: safe_done; split=>//.
+by exact: valid_N_init.
+Qed.
 
 Lemma triple_free: forall l,
   ⦃ valid l ⦄
   FREE l
   ⦃ fun _ => emp ⦄.
 Proof.
-  intros l h (v0 & P). red in P.
-  assert (L: h l = Some v0).
-  { subst h. apply hupdate_same. }
-  constructor; auto.
-- constructor. congruence. 
-- intros c' h' RED; inv RED. constructor.
-  red. apply heap_extensionality; intros x. cbn.
-  destruct (Z.eq_dec l x); auto.
+move=>l h [v0 P].
+have L: h l = Some v0 by rewrite P /= eq_refl.
+apply: safe_step=>//.
+- by apply: immsafe_free; rewrite L.
+move=>c' h' R.
+case: {-2}_ {-1}_ / R (erefl (FREE l, h)) (erefl (c', h'))=>// ?? E.
+case=>ES EH; case=>->->; rewrite {}ES {}EH in E *.
+rewrite P; apply: safe_done.
+by apply: heap_extensionality=>? /=; case: eqP.
 Qed.
 
 (** ** 2.4. Properties of the [safe] predicate *)
@@ -303,25 +331,28 @@ Qed.
 Lemma safe_pure: forall v h Q,
   safe (PURE v) h Q -> Q v h.
 Proof.
-  intros. inv H. 
-- auto.
-- contradiction.
+move=>v ?? S.
+case: {-2}_ _ _ / S (erefl (PURE v)).
+- by move=>????; case=><-.
+by move=>??? NP ?? E; rewrite E in NP.
 Qed.
 
 Lemma safe_red: forall c h Q c' h',
-  safe  c h Q -> red (c, h) (c', h') -> safe c' h' Q.
+  safe c h Q -> red (c, h) (c', h') -> safe c' h' Q.
 Proof.
-  intros. inv H.
-- inv H0.
-- eauto.
+move=>c h ??? S R.
+case: {-1}_ {-1}_ _ / S (erefl c) (erefl h).
+- move=>v ??? E ?; rewrite E in R.
+  by case: {-1}_ _ / R (erefl (PURE v, h)).
+move=>????? H EC EH.
+by apply: H; rewrite -EC -EH.
 Qed.
 
 Lemma safe_immsafe: forall c h Q,
   safe c h Q -> immsafe (c, h).
 Proof.
-  intros. inv H.
-- constructor.
-- auto.
+move=>???; case=>// ????.
+by exact: immsafe_pure.
 Qed.
 
 Lemma safe_let: forall (Q R: postcond) f,
@@ -330,22 +361,29 @@ Lemma safe_let: forall (Q R: postcond) f,
   safe c h Q ->
   safe (LET c f) h R.
 Proof.
-  intros Q R f POST. induction 1.
-- constructor; auto.
-  + constructor. constructor.
-  + intros c' h' RED; inv RED. apply POST; auto. inv H1.
-- constructor; auto.
-  + constructor; auto.
-  + intros c' h' RED; inv RED. contradiction. eauto.
+move=>Q ? f HP ?? S; elim: {-1}_ / S (erefl Q).
+- move=>v h1 ?? E; apply: safe_step=>//; first by apply/immsafe_let/immsafe_pure.
+  move=>c' h' R.
+  case: {-2}_ {-1}_ / R (erefl (LET (PURE v) f, h1)) (erefl (c', h'))=>//.
+  - move=>???; case=>->->->; case=>->->.
+    by apply: HP; rewrite E.
+  - move=>????? R; case=>EC->EH; case=>->->; rewrite {}EC {}EH in R.
+    by case: {-1}_ _ / R (erefl (PURE v, h1)).
+- move=>c1 h1 ? NP ?? H2 ?; apply: safe_step=>//; first by apply: immsafe_let.
+  move=>c' h' R.
+  case: {-2}_ {-1}_ / R (erefl (LET c1 f, h1)) (erefl (c', h'))=>//.
+  - by move=>???; case=>E; rewrite -E in NP.
+  move=>????? R; case=>EC->EH; case=>->->; rewrite {}EC {}EH in R.
+  by apply: H2.
 Qed.
 
 Lemma safe_consequence: forall (Q Q': postcond),
   (forall v, Q v -->> Q' v) ->
   forall c h, safe c h Q -> safe c h Q'.
 Proof.
-  intros Q Q' IMP. induction 1.
-- apply safe_done. apply IMP. assumption.
-- apply safe_step; auto.
+move=>Q ? I ?? S; elim: {-1}_ / S (erefl Q).
+- by move=>???? E; apply/safe_done/I; rewrite E.
+- by move=>?????? H3 ?; apply: safe_step=>// ???; apply: H3.
 Qed.
 
 (** ** 2.5. Rules for control structures *)
@@ -354,7 +392,7 @@ Lemma triple_pure: forall P v (Q: postcond),
   P -->> Q v ->
   ⦃ P ⦄ PURE v ⦃ Q ⦄.
 Proof.
-  intros; intros h Ph. constructor. apply H; auto.
+by move=>??? H ??; apply/safe_done/H.
 Qed.
 
 Lemma triple_let:
@@ -363,8 +401,7 @@ Lemma triple_let:
   (forall v, ⦃ Q v ⦄ f v ⦃ R ⦄) ->
   ⦃ P ⦄ LET c f ⦃ R ⦄.
 Proof.
-  intros until R; intros HR1 HR2 h Ph.
-  apply safe_let with Q. apply HR2. apply HR1. auto.
+by move=>??? Q ? H ???; apply/(safe_let Q)/H.
 Qed.
 
 Lemma triple_ifthenelse: forall b c1 c2 P Q,
@@ -372,11 +409,12 @@ Lemma triple_ifthenelse: forall b c1 c2 P Q,
   ⦃ (b = 0) //\\ P ⦄ c2 ⦃ Q ⦄ ->
   ⦃ P ⦄ IFTHENELSE b c1 c2 ⦃ Q ⦄.
 Proof.
-  intros until Q; intros HR1 HR2 h Ph. constructor; auto.
-- constructor.
-- intros c' h' RED; inv RED. destruct (Z.eqb_spec b 0).
-  + apply HR2. split; auto.
-  + apply HR1. split; auto.
+move=>b c1 c2 ?? H1 H2 h ?; apply: safe_step=>//.
+- by exact: immsafe_ifthenelse.
+move=>c' h' R.
+case: {-2}_ {-1}_ / R (erefl (IFTHENELSE b c1 c2, h)) (erefl (c', h'))=>// ????.
+case=>->->->->; case=>->->.
+by case: eqP=>?; [apply: H2|apply: H1].
 Qed.
 
 Lemma triple_consequence: forall P P' c Q' Q,
@@ -384,7 +422,8 @@ Lemma triple_consequence: forall P P' c Q' Q,
   P -->> P' -> (forall v, Q' v -->> Q v) ->
   ⦃ P ⦄ c ⦃ Q ⦄.
 Proof.
-  intros; red; intros. apply safe_consequence with Q'; auto. 
+move=>????? H HP ???.
+by apply/safe_consequence/H/HP.
 Qed.
 
 Lemma triple_pick: forall n,
@@ -392,9 +431,11 @@ Lemma triple_pick: forall n,
   PICK n
   ⦃ fun i => pure (0 <= i < n) ⦄.
 Proof.
-  intros n h Ph. constructor; auto.
-- constructor.
-- intros c' h' RED; inv RED. constructor. split; auto.
+move=>n h ?; apply: safe_step=>//; first by exact: immsafe_pick.
+move=>c' h' R.
+case: {-2}_ {-1}_ / R (erefl (PICK n, h)) (erefl (c', h'))=>// ??? LE.
+case=>EN->; case=>->->; rewrite {}EN in LE.
+by apply: safe_done.
 Qed.
 
 (** ** 2.6.  Useful derived rules *)
@@ -406,7 +447,8 @@ Lemma triple_consequence_pre: forall P P' c Q,
   P -->> P' ->
   ⦃ P ⦄ c ⦃ Q ⦄.
 Proof.
-  intros. apply triple_consequence with P' Q; auto. intros; red; auto.
+move=>? P' ? Q ???.
+by apply: (triple_consequence _ P' _ Q)=>// ?.
 Qed.
 
 Lemma triple_consequence_post: forall P c Q Q',
@@ -414,39 +456,38 @@ Lemma triple_consequence_post: forall P c Q Q',
   (forall v, Q' v -->> Q v) ->
   ⦃ P ⦄ c ⦃ Q ⦄.
 Proof.
-  intros. apply triple_consequence with P Q'; auto. red; auto.
+move=>P ? ? Q' ???.
+by apply: (triple_consequence _ P _ Q').
 Qed.
 
 Lemma triple_lift_pure: forall (P: Prop) P' c Q,
   (P -> ⦃ P' ⦄ c ⦃ Q ⦄) ->
   ⦃ P //\\ P' ⦄ c ⦃ Q ⦄.
 Proof.
-  intros. intros h [P1 P2]. apply H; auto.
+by move=>???? H ?[??]; apply: H.
 Qed.
 
 Lemma triple_lift_exists: forall (X: Type) (P: X -> assertion) c Q,
   (forall x, ⦃ P x ⦄ c ⦃ Q ⦄) ->
   ⦃ aexists P ⦄ c ⦃ Q ⦄.
 Proof.
-  intros. intros h (x & Px). apply (H x); auto.
+by move=>???? H ?[? P]; apply/H/P.
 Qed.
 
 Lemma triple_ifthen: forall b c1 c2 P Q,
   b <> 0 -> ⦃ P ⦄ c1 ⦃ Q ⦄ ->
   ⦃ P ⦄ IFTHENELSE b c1 c2 ⦃ Q ⦄.
 Proof.
-  intros. apply triple_ifthenelse; apply triple_lift_pure; intros.
-- auto.
-- lia.
+move=>?????? H ? H2.
+by apply/triple_ifthenelse/H2; apply: triple_lift_pure.
 Qed.
 
 Lemma triple_ifelse: forall b c1 c2 P Q,
   b = 0 -> ⦃ P ⦄ c2 ⦃ Q ⦄ ->
   ⦃ P ⦄ IFTHENELSE b c1 c2 ⦃ Q ⦄.
 Proof.
-  intros. apply triple_ifthenelse; apply triple_lift_pure; intros.
-- lia.
-- auto.
+move=>?????? H ? H2.
+by apply/triple_ifthenelse/H2; apply: triple_lift_pure.
 Qed.
 
 Lemma unroll_com: forall c,
@@ -460,9 +501,7 @@ Lemma unroll_com: forall c,
       | FREE l => FREE l
       | PICK n => PICK n
       end.
-Proof.
-  destruct c; auto.
-Qed.
+Proof. by case. Qed.
 
 (** * 3. Singly-linked lists *)
 
@@ -474,7 +513,7 @@ Qed.
 -   [l] is the Coq list of the list elements.
 *)
 
-Fixpoint list_at (a: addr) (l: list Z) : assertion :=
+Fixpoint list_at (a: addr) (l: list int) : assertion :=
   match l with
   | nil => (a = 0) //\\ emp
   | h :: t => (a <> 0) //\\ aexists (fun a' => contains a h ** contains (a + 1) a' ** list_at a' t)
@@ -482,7 +521,7 @@ Fixpoint list_at (a: addr) (l: list Z) : assertion :=
 
 (** ** The "cons" operation *)
 
-Definition list_cons (n: Z) (a: addr) : com :=
+Definition list_cons (n: int) (a: addr) : com :=
   LET (ALLOC 2) (fun a' => SEQ (SET a' n) (SEQ (SET (a' + 1) a) (PURE a'))).
 
 Lemma list_cons_correct: forall a n l,
@@ -495,11 +534,11 @@ Proof.
   intros b; simpl. rewrite lift_pureconj, ! sepconj_assoc, sepconj_emp.
   apply triple_lift_pure; intros H1.
   eapply triple_let. apply triple_frame. apply triple_set. simpl; intros _.
-  eapply triple_let. rewrite sepconj_pick2. 
+  eapply triple_let. rewrite sepconj_pick2.
   apply triple_frame. apply triple_set. simpl; intros _.
-  rewrite sepconj_pick2. 
+  rewrite sepconj_pick2.
   apply triple_pure. intros h A. split. auto. exists a; auto.
-Qed.   
+Qed.
 
 (** ** Computing the length of a list *)
 
@@ -589,7 +628,7 @@ Proof.
   rewrite sepconj_assoc.
   eapply triple_let.
   + rewrite sepconj_assoc, sepconj_pick2. apply triple_frame. apply triple_get.
-  + intros t. simpl. 
+  + intros t. simpl.
     rewrite lift_pureconj. apply triple_lift_pure. intros H2; subst t.
     apply triple_ifthenelse.
     * apply triple_lift_pure. intros H2.
@@ -615,7 +654,7 @@ Lemma list_concat_correct: forall l1 a1 l2 a2,
     ⦃ fun a => list_at a (l1 ++ l2) ⦄.
 Proof.
   intros. unfold list_concat. apply triple_ifthenelse.
-- apply triple_lift_pure; intros H1. 
+- apply triple_lift_pure; intros H1.
   eapply triple_let. apply list_concat_rec_correct; auto.
   simpl. intros _. apply triple_pure. red; auto.
 - apply triple_lift_pure; intros H1.
@@ -660,12 +699,12 @@ Proof.
   rewrite lift_aexists; apply triple_lift_exists; intros a'.
   apply triple_ifthen; auto.
   eapply triple_let.
-  rewrite ! sepconj_assoc, sepconj_pick2. 
+  rewrite ! sepconj_assoc, sepconj_pick2.
   apply triple_frame. apply triple_get. intros a''. simpl.
   rewrite lift_pureconj. apply triple_lift_pure. intros H3. subst a''.
   eapply triple_let.
-  apply triple_frame. eapply triple_consequence_pre. 
-  apply triple_set. 
+  apply triple_frame. eapply triple_consequence_pre.
+  apply triple_set.
   intros h P; exists a'; auto.
   simpl. intros _.
   rewrite sepconj_pick2, sepconj_pick3.
@@ -680,7 +719,7 @@ Lemma list_rev_correct: forall a l,
     ⦃ fun x => list_at x (List.rev l) ⦄.
 Proof.
   intros. rewrite List.rev_alt.
-  eapply triple_consequence_pre. apply list_rev_rec_correct. 
+  eapply triple_consequence_pre. apply list_rev_rec_correct.
   simpl. rewrite sepconj_comm, lift_pureconj, sepconj_emp.
   intros h A; split; auto.
 Qed.
@@ -726,10 +765,10 @@ Proof.
   assert (L1: h1 l = Some v).
   { red in H1. subst h1. apply hupdate_same. }
   assert (L: h l = Some v).
-  { intros. rewrite U; simpl. rewrite L1; auto. } 
+  { intros. rewrite U; simpl. rewrite L1; auto. }
   constructor; auto.
   - constructor. congruence.
-  - intros c' h' RED. inv RED. constructor. 
+  - intros c' h' RED. inv RED. constructor.
     exists h1, h2. unfold pureconj. intuition congruence.
 Qed.
 
@@ -741,10 +780,10 @@ Proof.
   assert (L1: h1 l = Some v0).
   { subst h1; apply hupdate_same. }
   assert (L: h l = Some v0).
-  { rewrite U; cbn. rewrite L1; auto. } 
+  { rewrite U; cbn. rewrite L1; auto. }
   constructor; auto.
   - constructor. congruence.
-  - intros c' h' RED. inv RED. constructor. 
+  - intros c' h' RED. inv RED. constructor.
     exists (hupdate l v hempty), h2.
     split. red. auto.
     split. auto.
@@ -766,7 +805,7 @@ Proof.
   split. intros x. unfold hupdate, hempty; cbn. destruct (Z.eq_dec l x); auto.
   right. rewrite hinit_outside by lia. apply EMPTY; lia.
   apply heap_extensionality; intros x. cbn. destruct (Z.eq_dec l x); auto.
-Qed. 
+Qed.
 
 Lemma triple_alloc: forall sz,
   ⦃ emp ⦄
@@ -780,7 +819,7 @@ Proof.
   + apply FIN. lia.
 - intros c' h' RED; inv RED. constructor.
   rewrite lift_pureconj; split. auto. apply valid_N_init; auto.
-Qed. 
+Qed.
 
 Lemma triple_free: forall l,
   ⦃ valid l ⦄
@@ -792,16 +831,16 @@ Proof.
   assert (L1: h1 l = Some v0).
   { rewrite H1. apply hupdate_same. }
   assert (L: h l = Some v0).
-  { rewrite U; cbn. rewrite L1. auto. } 
+  { rewrite U; cbn. rewrite L1. auto. }
   constructor; auto.
-- constructor. congruence. 
+- constructor. congruence.
 - intros c' h' RED; inv RED. constructor. rewrite sepconj_emp.
   replace (hfree l (hunion h1 h2)) with h2; auto.
   apply heap_extensionality; intros x. generalize (D x); rewrite H1; cbn.
   destruct (Z.eq_dec l x); auto. intuition congruence.
 Qed.
 
-(** The rules for control structures are also valid.  
+(** The rules for control structures are also valid.
     Proof plan: first show Hoare-style rules for the [Hoare] triple,
     then frame by an arbitrary [R] to obtain the separation triple. *)
 
@@ -867,7 +906,7 @@ Lemma Hoare_consequence: forall P P' c Q' Q,
   P -->> P' -> (forall v, Q' v -->> Q v) ->
   Hoare P c Q.
 Proof.
-  intros; red; intros. apply safe_consequence with Q'; auto. 
+  intros; red; intros. apply safe_consequence with Q'; auto.
 Qed.
 
 Lemma triple_consequence: forall P P' c Q' Q,
@@ -887,7 +926,7 @@ Proof.
   intros P n h Ph. constructor; auto.
 - constructor.
 - intros c' h' RED; inv RED. constructor. split; auto.
-Qed. 
+Qed.
 
 Lemma triple_pick: forall n,
   ⦃ emp ⦄
@@ -1062,25 +1101,25 @@ Proof.
   assert (W: contains l v -->> wp (GET l) (fun v' => (v' = v) //\\ contains l v)).
   { apply wp_weakest. apply triple_get. }
   intros; red; intros.
-  eapply wp_ramification. eapply sepconj_imp_l. eexact W. 
+  eapply wp_ramification. eapply sepconj_imp_l. eexact W.
   eapply sepconj_imp_r. 2: eexact H.
   intros h' H' v' h'' D (A & B). subst v'. apply H'; auto.
 Qed.
 
 Lemma wp_set: forall l v Q,
-  valid l ** aforall (fun v' => (contains l v --* Q v')) -->> wp (SET l v) Q. 
+  valid l ** aforall (fun v' => (contains l v --* Q v')) -->> wp (SET l v) Q.
 Proof.
   intros.
   assert (W: valid l -->> wp (SET l v) (fun _ => contains l v)).
   { apply wp_weakest. apply triple_set. }
   intros; red; intros.
-  eapply wp_ramification. eapply sepconj_imp_l. eexact W. 
+  eapply wp_ramification. eapply sepconj_imp_l. eexact W.
   eapply sepconj_imp_r. 2: eexact H.
   red; auto.
 Qed.
 
 Corollary wp_set': forall l v Q,
-  valid l ** (contains l v --* Q) -->> wp (SET l v) (fun _ => Q). 
+  valid l ** (contains l v --* Q) -->> wp (SET l v) (fun _ => Q).
 Proof.
   intros; red; intros. apply wp_set. eapply sepconj_imp_r; eauto.
   intros h' H' v'. auto.
@@ -1093,7 +1132,7 @@ Proof.
   assert (W: valid l -->> wp (FREE l) (fun _ => emp)).
   { apply wp_weakest. apply triple_free. }
   intros; red; intros.
-  eapply wp_ramification. eapply sepconj_imp_l. eexact W. 
+  eapply wp_ramification. eapply sepconj_imp_l. eexact W.
   eapply sepconj_imp_r. 2: eexact H.
   red; intros. intros v h' D E. rewrite E in *. rewrite hunion_comm, hunion_empty by HDISJ.
   apply H0.
@@ -1113,7 +1152,7 @@ Proof.
   assert (W: emp -->> wp (PICK n) (fun i => pure (0 <= i < n))).
   { apply wp_weakest. apply triple_pick. }
   intros; red; intros.
-  eapply wp_ramification. eapply sepconj_imp_l. eexact W. 
+  eapply wp_ramification. eapply sepconj_imp_l. eexact W.
   eapply sepconj_imp_r. 2: rewrite sepconj_emp; eexact H.
   red; auto.
 Qed.
