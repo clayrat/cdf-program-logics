@@ -1,11 +1,10 @@
 (** Hoare logic. *)
 
-From Coq Require Import ssreflect ssrfun ssrbool Lia String FunctionalExtensionality.
-From mathcomp Require Import ssrnat ssrint ssralg ssrnum eqtype order zify.
+From Coq Require Import ssreflect ssrfun ssrbool String Lia FunctionalExtensionality.
+From mathcomp Require Import ssrnat ssrint ssrnum ssralg eqtype order zify.
 From Paco Require Import paco.
 From CDF Require Import Sequences.
 Import Order.Theory.
-
 Local Open Scope ring_scope.
 
 (* TODO move to Util *)

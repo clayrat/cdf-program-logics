@@ -5,10 +5,6 @@ From mathcomp Require Import ssrint ssrnum ssralg eqtype order zify.
 Import Order.Theory.
 Local Open Scope ring_scope.
 
-(*From Coq Require Import ZArith Lia Bool String List.
-From Coq Require Import FunctionalExtensionality PropExtensionality.
-Local Open Scope Z_scope.*)
-
 (** * 1. Memory heaps *)
 
 (** A memory heap is a partial function from addresses (memory locations)
@@ -165,32 +161,6 @@ Qed.
 Definition hdisj3 (h1 h2 h3: heap) :=
   hdisjoint h1 h2 /\ hdisjoint h1 h3 /\ hdisjoint h2 h3.
 
-(** A tactic to prove disjointness statements. *)
-
-(*
-Ltac HDISJ :=
-  match goal with
-  | [ H: hdisj3 _ _ _ |- _ ] =>
-      destruct H as (? & ? & ?); HDISJ
-  | [ H: hdisjoint (hunion _ _) _ |- _ ] =>
-      apply hdisjoint_union_l in H; destruct H; HDISJ
-  | [ H: hdisjoint _ (hunion _ _) |- _ ] =>
-      apply hdisjoint_union_r in H; destruct H; HDISJ
-  | [ |- hdisj3 _ _ _ ] =>
-      split; [|split]; HDISJ
-  | [ |- hdisjoint (hunion _ _) _ ] =>
-      apply hdisjoint_union_l; split; HDISJ
-  | [ |- hdisjoint _ (hunion _ _) ] =>
-      apply hdisjoint_union_r; split; HDISJ
-  | [ |- hdisjoint hempty _ ] =>
-      red; auto
-  | [ |- hdisjoint _ hempty ] =>
-      red; auto
-  | [ |- hdisjoint _ _ ] =>
-      assumption || (apply hdisjoint_sym; assumption) || idtac
-  | _ => idtac
-  end.
-*)
 Lemma hunion_invert_r:
   forall h1 h2 h,
   hunion h h1 = hunion h h2 -> hdisjoint h h1 -> hdisjoint h h2 -> h1 = h2.
@@ -516,7 +486,7 @@ Qed.
 Remark precise_param_precise:
   forall P, precise P -> param_precise (fun _ : unit => P).
 Proof.
-move=>? H [] [] ?????????; split=>//.
+move=>? H [][]?????????; split=>//.
 by apply: H.
 Qed.
 
