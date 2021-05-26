@@ -74,7 +74,7 @@ Fixpoint hinit (l: addr) (sz: nat) (h: heap) : heap :=
   match sz with O => h | S sz => hupdate l 0 (hinit (l + 1) sz h) end.
 
 Lemma hinit_inside:
-  forall h (sz :nat) l l', l <= l' < l + Posz sz -> hinit l sz h l' = Some 0.
+  forall h (sz :nat) l l', l <= l' < l + sz%:Z -> hinit l sz h l' = Some 0.
 Proof.
 move=>?; elim=>/=.
 - by lia.
@@ -83,7 +83,7 @@ move=>?; elim=>/=.
 Qed.
 
 Lemma hinit_outside:
-  forall h sz l l', l' < l \/ l + Posz sz <= l' -> hinit l sz h l' = h l'.
+  forall h sz l l', l' < l \/ l + sz%:Z <= l' -> hinit l sz h l' = h l'.
 Proof.
 move=>?; elim=>//=.
 move=>? IH ???; case: ifP.

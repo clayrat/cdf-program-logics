@@ -4,6 +4,7 @@ From Coq Require Import ssreflect ssrfun ssrbool Lia FunctionalExtensionality Pr
 From mathcomp Require Import ssrint ssrnum ssralg seq eqtype order zify.
 From CDF Require Import Sequences Separation.
 Import Order.Theory.
+Import GRing.Theory.
 Local Open Scope ring_scope.
 
 (*
@@ -58,9 +59,11 @@ Definition not_pure (c : com) :=
 
 Definition SKIP: com := PURE 0.
 
-Definition SEQ (c1 c2: com) := LET c1 (fun _ => c2).
+Definition SEQ (c1 c2: com) := LET c1 (fun _ =>
+                               c2).
 
-Definition EITHER (c1 c2: com) := LET (PICK 2) (fun n => IFTHENELSE n c1 c2).
+Definition EITHER (c1 c2: com) := LET (PICK 2) (fun n =>
+                                  IFTHENELSE n c1 c2).
 
 (** Reduction semantics. *)
 
@@ -76,7 +79,7 @@ Inductive red: com * heap -> com * heap -> Prop :=
   | red_ifthenelse: forall b c1 c2 h,
       red (IFTHENELSE b c1 c2, h) (if b == 0 then c2 else c1, h)
   | red_alloc: forall sz (h: heap) l,
-      (forall i, l <= i < l + Posz sz -> h i = None) ->
+      (forall i, l <= i < l + sz%:Z -> h i = None) ->
       l <> 0 ->
       red (ALLOC sz, h) (PURE l, hinit l sz h)
   | red_get: forall l (h: heap) v,
@@ -101,7 +104,7 @@ Inductive immsafe: com * heap -> Prop :=
   | immsafe_ifthenelse: forall b c1 c2 h,
       immsafe (IFTHENELSE b c1 c2, h)
   | immsafe_alloc: forall (sz : nat) (h: heap) l,
-      l <> 0 -> (forall i, l <= i < l + Posz sz -> h i = None) ->
+      l <> 0 -> (forall i, l <= i < l + sz%:Z -> h i = None) ->
       immsafe (ALLOC sz, h)
   | immsafe_get: forall l (h: heap),
       h l <> None -> immsafe (GET l, h)
@@ -522,22 +525,25 @@ Fixpoint list_at (a: addr) (l: list int) : assertion :=
 (** ** The "cons" operation *)
 
 Definition list_cons (n: int) (a: addr) : com :=
-  LET (ALLOC 2) (fun a' => SEQ (SET a' n) (SEQ (SET (a' + 1) a) (PURE a'))).
+  LET (ALLOC 2) (fun a' =>
+  SEQ (SET a' n)
+  (SEQ (SET (a' + 1) a)
+  (PURE a'))).
 
 Lemma list_cons_correct: forall a n l,
     ⦃ list_at a l ⦄
   list_cons n a
     ⦃ fun a' => list_at a' (n :: l) ⦄.
 Proof.
-  intros. eapply triple_let.
-  rewrite <- sepconj_emp at 1. apply triple_frame. apply triple_alloc.
-  intros b; simpl. rewrite lift_pureconj, ! sepconj_assoc, sepconj_emp.
-  apply triple_lift_pure; intros H1.
-  eapply triple_let. apply triple_frame. apply triple_set. simpl; intros _.
-  eapply triple_let. rewrite sepconj_pick2.
-  apply triple_frame. apply triple_set. simpl; intros _.
-  rewrite sepconj_pick2.
-  apply triple_pure. intros h A. split. auto. exists a; auto.
+move=>a ??? H; apply/triple_let/H.
+- by rewrite -[list_at _ _]sepconj_emp; apply/triple_frame/triple_alloc.
+move=>? /=; rewrite lift_pureconj !sepconj_assoc sepconj_emp.
+apply: triple_lift_pure=>?.
+apply: triple_let; first by apply/triple_frame/triple_set.
+move=>? /=; apply: triple_let.
+- by rewrite sepconj_pick2; apply/triple_frame/triple_set.
+move=>? /=; rewrite sepconj_pick2; apply: triple_pure=>??; split=>//.
+by exists a.
 Qed.
 
 (** ** Computing the length of a list *)
@@ -545,8 +551,10 @@ Qed.
 (** Taking advantage of the coinductive nature of type [com],
     we use infinite commands to represent loops and tail-recursive functions. *)
 
-CoFixpoint list_length_rec (a: addr) (len: Z) : com :=
-  IFTHENELSE a (LET (GET (a + 1)) (fun t => list_length_rec t (len + 1))) (PURE len).
+CoFixpoint list_length_rec (a: addr) (len: int) : com :=
+  IFTHENELSE a (LET (GET (a + 1)) (fun t =>
+                    list_length_rec t (len + 1)))
+               (PURE len).
 
 Definition list_length (a: addr) : com := list_length_rec a 0.
 
@@ -568,32 +576,29 @@ Definition list_length (a: addr) : com := list_length_rec a 0.
 Lemma list_length_rec_correct: forall l a len,
     ⦃ list_at a l ⦄
   list_length_rec a len
-    ⦃ fun len' => (len' = len + Z.of_nat (List.length l)) //\\ list_at a l ⦄.
+    ⦃ fun len' => (len' = len + (length l)%:Z) //\\ list_at a l ⦄.
 Proof.
-Local Opaque Z.of_nat.
-  induction l as [ | h t]; intros; rewrite (unroll_com (list_length_rec a len)); cbn.
-- apply triple_lift_pure; intro H1.
-  apply triple_ifelse; auto.
-  apply triple_pure. intros h H2. split. lia. split; auto.
-- apply triple_lift_pure; intro H1.
-  apply triple_lift_exists; intros a'.
-  apply triple_ifthen; auto.
-  eapply triple_let.
-  rewrite sepconj_pick2. apply triple_frame. apply triple_get. simpl.
-  intros a''. rewrite lift_pureconj. apply triple_lift_pure; intros H3. subst a''.
-  rewrite sepconj_swap3.
-  eapply triple_consequence_post.
-  apply triple_frame. apply IHt. intros len'; simpl.
-  rewrite lift_pureconj. rewrite <- sepconj_swap3, sepconj_pick2.
-  intros h1 (A & B). split. lia. split. auto. exists a'; auto.
+elim=>[|?? IH] a len; rewrite (unroll_com (list_length_rec a len)) /=.
+- apply: triple_lift_pure=>->; apply: triple_ifelse=>//.
+  apply: triple_pure=>??; split=>//.
+  by rewrite addr0.
+apply: triple_lift_pure=>?; apply: triple_lift_exists=>x.
+apply: triple_ifthen=>//; apply: triple_let.
+- by rewrite sepconj_pick2; apply/triple_frame/triple_get.
+move=>? /=; rewrite lift_pureconj; apply: triple_lift_pure=>->.
+rewrite sepconj_swap3.
+apply: triple_consequence_post; first by apply/triple_frame/IH.
+move=>? /=; rewrite lift_pureconj -sepconj_swap3 sepconj_pick2.
+move=>?[->?]; do!split=>//; first by rewrite -addrA.
+by exists x.
 Qed.
 
 Corollary list_length_correct: forall l a,
     ⦃ list_at a l ⦄
   list_length a
-    ⦃ fun len => (len = Z.of_nat (length l)) //\\ list_at a l ⦄.
+    ⦃ fun len => (len = (length l)%:Z) //\\ list_at a l ⦄.
 Proof.
-  intros. apply list_length_rec_correct.
+by move=>????; apply: list_length_rec_correct.
 Qed.
 
 (** ** Concatenating two lists in-place *)
@@ -610,10 +615,14 @@ Qed.
 *)
 
 CoFixpoint list_concat_rec (a1 a2: addr) : com :=
-  LET (GET (a1 + 1)) (fun t => IFTHENELSE t (list_concat_rec t a2) (SET (a1 + 1) a2)).
+  LET (GET (a1 + 1))
+      (fun t => IFTHENELSE t (list_concat_rec t a2)
+                             (SET (a1 + 1) a2)).
 
 Definition list_concat (a1 a2: addr) : com :=
-  IFTHENELSE a1 (SEQ (list_concat_rec a1 a2) (PURE a1)) (PURE a2).
+  IFTHENELSE a1 (SEQ (list_concat_rec a1 a2)
+                     (PURE a1))
+                (PURE a2).
 
 Lemma list_concat_rec_correct: forall l2 a2 l1 a1,
   a1 <> 0 ->
@@ -621,31 +630,24 @@ Lemma list_concat_rec_correct: forall l2 a2 l1 a1,
   list_concat_rec a1 a2
     ⦃ fun _ => list_at a1 (l1 ++ l2) ⦄.
 Proof.
-  induction l1 as [ | h1 t1]; intros; rewrite (unroll_com (list_concat_rec a1 a2)); simpl.
-- rewrite lift_pureconj. apply triple_lift_pure; intros. lia.
-- rewrite lift_pureconj. apply triple_lift_pure. intros H1.
-  rewrite lift_aexists. apply triple_lift_exists. intros a'.
-  rewrite sepconj_assoc.
-  eapply triple_let.
-  + rewrite sepconj_assoc, sepconj_pick2. apply triple_frame. apply triple_get.
-  + intros t. simpl.
-    rewrite lift_pureconj. apply triple_lift_pure. intros H2; subst t.
-    apply triple_ifthenelse.
-    * apply triple_lift_pure. intros H2.
-      rewrite <- sepconj_assoc, sepconj_comm.
-      eapply triple_consequence_post. apply triple_frame. apply IHt1. auto.
-      simpl. intros _. rewrite sepconj_pick2, sepconj_swap3.
-      intros h P. split; auto. exists a'; auto.
-    * apply triple_lift_pure. intros H2.
-      eapply triple_consequence_post.
-      apply triple_frame.
-      eapply triple_consequence_pre. apply triple_set.
-      intros h P; exists a'; auto.
-      simpl. intros _. rewrite sepconj_pick2, sepconj_pick3.
-      destruct t1; simpl.
-      ** rewrite lift_pureconj, sepconj_emp.
-         intros h (A & B). split; auto. exists a2; auto.
-      ** rewrite lift_pureconj. intros h (A & B). lia.
+move=>? a2; elim=>[|? t1 IH] a1 ?;
+rewrite (unroll_com (list_concat_rec a1 a2)) /= lift_pureconj;
+apply: triple_lift_pure=>? //.
+rewrite lift_aexists; apply: triple_lift_exists=>x.
+rewrite sepconj_assoc; apply: triple_let.
+- by rewrite sepconj_assoc sepconj_pick2; apply/triple_frame/triple_get.
+move=>? /=; rewrite lift_pureconj; apply: triple_lift_pure=>->.
+apply: triple_ifthenelse; apply: triple_lift_pure=>?.
+- rewrite -sepconj_assoc sepconj_comm.
+  apply: triple_consequence_post; first by apply/triple_frame/IH.
+  move=>?? /=; rewrite -sepconj_swap3 sepconj_pick2=>?; split=>//.
+  by exists x.
+apply: triple_consequence_post.
+- apply/triple_frame/triple_consequence_pre; first by apply: triple_set.
+  by move=>??; exists x.
+move=>? /=; rewrite sepconj_pick2 sepconj_pick3.
+case: {IH}t1=>[|??] /=; rewrite lift_pureconj ?sepconj_emp => ?[??] //.
+by split=>//; exists a2.
 Qed.
 
 Lemma list_concat_correct: forall l1 a1 l2 a2,
@@ -653,14 +655,13 @@ Lemma list_concat_correct: forall l1 a1 l2 a2,
   list_concat a1 a2
     ⦃ fun a => list_at a (l1 ++ l2) ⦄.
 Proof.
-  intros. unfold list_concat. apply triple_ifthenelse.
-- apply triple_lift_pure; intros H1.
-  eapply triple_let. apply list_concat_rec_correct; auto.
-  simpl. intros _. apply triple_pure. red; auto.
-- apply triple_lift_pure; intros H1.
-  destruct l1; simpl.
-  + apply triple_pure. rewrite lift_pureconj, sepconj_emp. intros h (A & B); auto.
-  + rewrite lift_pureconj. apply triple_lift_pure. intros; lia.
+move=>l1 ???; rewrite /list_concat.
+apply: triple_ifthenelse; apply: triple_lift_pure=>?.
+- apply: triple_let; first by apply: list_concat_rec_correct.
+  by move=>? /=; apply: triple_pure.
+case: l1=>[|??] /=.
+- by apply: triple_pure; rewrite lift_pureconj sepconj_emp=>?[??].
+by rewrite lift_pureconj; apply: triple_lift_pure=>?.
 Qed.
 
 (** ** List reversal in place *)
@@ -692,36 +693,30 @@ Lemma list_rev_rec_correct: forall l a l' p,
   list_rev_rec a p
     ⦃ fun x => list_at x (List.rev_append l l') ⦄.
 Proof.
-  induction l as [ | hd l]; intros; rewrite (unroll_com (list_rev_rec a p)); simpl.
-- rewrite lift_pureconj, sepconj_emp. apply triple_lift_pure; intros H1.
-  apply triple_ifelse; auto. apply triple_pure. red; auto.
-- rewrite lift_pureconj; apply triple_lift_pure; intros H1.
-  rewrite lift_aexists; apply triple_lift_exists; intros a'.
-  apply triple_ifthen; auto.
-  eapply triple_let.
-  rewrite ! sepconj_assoc, sepconj_pick2.
-  apply triple_frame. apply triple_get. intros a''. simpl.
-  rewrite lift_pureconj. apply triple_lift_pure. intros H3. subst a''.
-  eapply triple_let.
-  apply triple_frame. eapply triple_consequence_pre.
-  apply triple_set.
-  intros h P; exists a'; auto.
-  simpl. intros _.
-  rewrite sepconj_pick2, sepconj_pick3.
-  eapply triple_consequence_pre.
-  apply IHl.
-  simpl. apply sepconj_imp_r. intros h A. split; auto. exists p; auto.
+elim=>[| ?? IH] a ? p; rewrite (unroll_com (list_rev_rec a p)) /=
+  lift_pureconj ?sepconj_emp; apply: triple_lift_pure=>?.
+- by apply/triple_ifelse/triple_pure.
+rewrite lift_aexists; apply: triple_lift_exists=>x.
+apply/triple_ifthen/triple_let=>//.
+- rewrite !sepconj_assoc sepconj_pick2.
+  by apply/triple_frame/triple_get.
+move=>? /=; rewrite lift_pureconj; apply: triple_lift_pure=>->.
+apply: triple_let.
+- apply/triple_frame/triple_consequence_pre; first by apply: triple_set.
+  by move=>??; exists x.
+move=>? /=; rewrite sepconj_pick2 sepconj_pick3.
+apply: triple_consequence_pre; first by apply: IH.
+apply: sepconj_imp_r=>??; split=>//.
+by exists p.
 Qed.
 
 Lemma list_rev_correct: forall a l,
     ⦃ list_at a l ⦄
   list_rev a
-    ⦃ fun x => list_at x (List.rev l) ⦄.
+    ⦃ fun x => list_at x (rev l) ⦄.
 Proof.
-  intros. rewrite List.rev_alt.
-  eapply triple_consequence_pre. apply list_rev_rec_correct.
-  simpl. rewrite sepconj_comm, lift_pureconj, sepconj_emp.
-  intros h A; split; auto.
+move=>??; apply: triple_consequence_pre; first by apply: list_rev_rec_correct.
+by move=>?? /=; rewrite sepconj_comm lift_pureconj sepconj_emp.
 Qed.
 
 (** * 4. An alternate definition of separation logic triples *)
@@ -1156,6 +1151,3 @@ Proof.
   eapply sepconj_imp_r. 2: rewrite sepconj_emp; eexact H.
   red; auto.
 Qed.
-
-
-
