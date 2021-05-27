@@ -1,10 +1,17 @@
 (** Concurrent separation logic. *)
 
+From Coq Require Import ssreflect ssrfun ssrbool Lia FunctionalExtensionality PropExtensionality.
+From mathcomp Require Import ssrnat ssrint ssrnum ssralg seq eqtype order zify.
+From CDF Require Import Sequences Separation.
+Local Open Scope ring_scope.
+
+(*
 From Coq Require Import ZArith Lia Bool String List.
 From Coq Require Import FunctionalExtensionality PropExtensionality.
 From CDF Require Import Sequences Separation.
 
 Local Open Scope Z_scope.
+*)
 
 (** * 1. A language with pointers and concurrency *)
 
@@ -16,16 +23,19 @@ Local Open Scope Z_scope.
     abstract syntax. *)
 
 Inductive com: Type :=
-  | PURE (x: Z)                      (**r command without effects *)
-  | LET (c: com) (f: Z -> com)       (**r sequencing of commands *)
-  | IFTHENELSE (b: Z) (c1 c2: com    (**r conditional *))
+  | PURE (x: int)                    (**r command without effects *)
+  | LET (c: com) (f: int -> com)     (**r sequencing of commands *)
+  | IFTHENELSE (b: int) (c1 c2: com  (**r conditional *))
   | REPEAT (c: com)                  (**r iterate [c] until it returns not 0 *)
   | PAR (c1 c2: com)                 (**r run [c1] and [c2] in parallel *)
   | ATOMIC (c: com)                  (**r run [c] as one atomic step *)
   | ALLOC (sz: nat)                  (**r allocate [sz] words of storage *)
-  | GET (l: Z)                       (**r dereference a pointer *)
-  | SET (l: Z) (v: Z)                (**r assign through a pointer *)
-  | FREE (l: Z).                     (**r free one word of storage *)
+  | GET (l: addr)                    (**r dereference a pointer *)
+  | SET (l: addr) (v: int)           (**r assign through a pointer *)
+  | FREE (l: addr).                  (**r free one word of storage *)
+
+Definition not_pure (c : com) :=
+  match c with PURE _ => false | _ => true end.
 
 (** Some derived forms. *)
 
@@ -35,14 +45,14 @@ Definition SEQ (c1 c2: com) := LET c1 (fun _ => c2).
 
 (** Locations that can be read / written right now. *)
 
-Fixpoint immacc (l: addr) (c: com) : Prop :=
+Fixpoint immacc (l: addr) (c: com) : bool :=
   match c with
   | LET c _ => immacc l c
-  | PAR c1 c2 => immacc l c1 \/ immacc l c2
-  | GET l' => l = l'
-  | SET l' _ => l = l'
-  | FREE l' => l = l'
-  | _ => False
+  | PAR c1 c2 => immacc l c1 || immacc l c2
+  | GET l' => l == l'
+  | SET l' _ => l == l'
+  | FREE l' => l == l'
+  | _ => false
   end.
 
 (** Reduction semantics. *)
@@ -54,7 +64,7 @@ Inductive red: com * heap -> com * heap -> Prop :=
       red (c, h) (c', h') ->
       red (LET c f, h) (LET c' f, h')
   | red_ifthenelse: forall b c1 c2 h,
-      red (IFTHENELSE b c1 c2, h) ((if Z.eqb b 0 then c2 else c1), h)
+      red (IFTHENELSE b c1 c2, h) ((if b == 0 then c2 else c1), h)
   | red_repeat: forall c h,
       red (REPEAT c, h) (LET c (fun b => IFTHENELSE b (PURE b) (REPEAT c)), h)
   | red_par_done: forall v1 v2 h,
@@ -67,9 +77,9 @@ Inductive red: com * heap -> com * heap -> Prop :=
       red (PAR c1 c2, h) (PAR c1 c2', h')
   | red_atomic: forall c h v h',
       star red (c, h) (PURE v, h') ->
-      red  (ATOMIC c, h) (PURE v, h')
+      red (ATOMIC c, h) (PURE v, h')
   | red_alloc: forall sz (h: heap) l,
-      (forall i, l <= i < l + Z.of_nat sz -> h i = None) ->
+      (forall i, l <= i < l + sz%:Z -> h i = None) ->
       l <> 0 ->
       red (ALLOC sz, h) (PURE l, hinit l sz h)
   | red_get: forall l (h: heap) v,
@@ -89,7 +99,7 @@ Inductive erroneous: com * heap -> Prop :=
   | erroneous_let: forall c f h,
       erroneous (c, h) -> erroneous (LET c f, h)
   | erroneous_par_race: forall c1 c2 h l,
-      immacc l c1 /\ immacc l c2 ->
+      immacc l c1 && immacc l c2 ->
       erroneous (PAR c1 c2, h)
   | erroneous_par_l: forall c1 c2 h,
       erroneous (c1, h) -> erroneous (PAR c1 c2, h)
@@ -110,7 +120,7 @@ Inductive erroneous: com * heap -> Prop :=
 
 Definition invariant := assertion.
 Definition precond := assertion.
-Definition postcond := Z -> assertion.
+Definition postcond := int -> assertion.
 
 (** ** 2.1.  Semantic definition of weak triples *)
 
@@ -137,7 +147,7 @@ Inductive safe: nat -> com -> heap -> postcond -> invariant -> Prop :=
       Q v h ->
       safe (S n) (PURE v) h Q J
   | safe_step: forall n c (h1: heap) (Q: postcond) (J: invariant)
-      (NOTDONE: match c with PURE _ => False | _ => True end)
+      (NOTDONE: not_pure c)
       (ACC: forall l, immacc l c -> h1 l <> None)
       (IMM: forall hf hj h,
          hdisj3 h1 hj hf ->
@@ -162,18 +172,17 @@ Notation "J '⊢' ⦃ P ⦄ c ⦃ Q ⦄" := (triple J P c Q) (at level 90, c at 
 
 (** ** 2.2. Properties about [safe] *)
 
-Ltac inv H := inversion H; clear H; subst.
-
 Lemma safe_pure: forall n v h (Q: postcond) J,
   Q v h -> safe n (PURE v) h Q J.
-Proof.
-  intros. destruct n; constructor; auto.
-Qed.
+Proof. by case=>[|n] ?????; [apply: safe_zero|apply: safe_done]. Qed.
 
 Lemma safe_pure_inv: forall n v h Q J,
   safe (S n) (PURE v) h Q J -> Q v h.
 Proof.
-  intros. inv H. auto. contradiction.
+move=>n v ??? HS.
+case: {-1}_ {-2}_ _ _ _ / HS (erefl (S n)) (erefl (PURE v)) =>//.
+- by move=>??????? [<-].
+by move=>????? ND ???? E; rewrite E in ND.
 Qed.
 
 Lemma safe_red: forall n c h1 Q J hj hf c' h',
@@ -186,9 +195,12 @@ Lemma safe_red: forall n c h1 Q J hj hf c' h',
     h' = hunion h1' (hunion hj' hf) /\
     J hj' /\ safe n c' h1' Q J.
 Proof.
-  intros. inv H0.
-- inv H.
-- eauto.
+move=>n c h1 Q J hj hf ?? R HS.
+case: {-1}_ {-2}_ {-2}_ _ _ / HS (erefl (S n)) (erefl c) (erefl h1) (erefl Q) (erefl J)=>//.
+- move=>? v ????? E; rewrite -E in R.
+  by case : {-1}_ _ / R (erefl (PURE v, hunion h1 (hunion hj hf))).
+move=>???????? ST [->] EC EH ????.
+by apply: (ST hf hj)=>//; rewrite EC EH.
 Qed.
 
 Lemma safe_redN: forall n c h1 Q J hj hf c' h',
@@ -201,12 +213,14 @@ Lemma safe_redN: forall n c h1 Q J hj hf c' h',
     h' = hunion h1' (hunion hj' hf) /\
     J hj' /\ safe 1%nat c' h1' Q J.
 Proof.
-  induction n; intros.
-- inv H. exists h1, hj; auto.
-- inv H. rename c' into c''. rename h' into h''. destruct b as [c' h'].
-  edestruct safe_red as (h1' & hj' & A & B & C & D).
-  eassumption. eassumption. assumption. assumption.
-  subst h'. eapply IHn; eauto.
+elim=>[|n IH] c h1 ?? hj hf c' h' HST HS ??.
+- case: {-1}_ {-2}_ {-1}_ / HST (erefl 0%N) (erefl (c, hunion h1 (hunion hj hf))) (erefl (c',h')) =>//.
+  move=>[??] _ [EC EH][->->]; rewrite {}EC {}EH.
+  by exists h1, hj.
+case: {-2}_ {-2}_ {-1}_ / HST (erefl (S n)) (erefl (c, hunion h1 (hunion hj hf))) (erefl (c',h')) =>//.
+move=>? [??][a1 ?][??] R S [EN][EA EB][->->]; rewrite {}EN {}EA {}EB in R S.
+case: (safe_red _ _ _ _ _ _ _ _ _ R HS)=>// h1'[hj'][D3][EB][?]?; rewrite {}EB in S.
+by apply/(IH a1 h1')/D3.
 Qed.
 
 Lemma safe_not_erroneous: forall n c h1 Q J hj hf,
@@ -215,9 +229,12 @@ Lemma safe_not_erroneous: forall n c h1 Q J hj hf,
   J hj ->
   ~ erroneous (c, hunion h1 (hunion hj hf)).
 Proof.
-  intros. inv H.
-- intros ST; inv ST.
-- eauto.
+move=>n c h1 Q J hj hf HS ??.
+case: {-1}_ {-2}_ {-2}_ _ {-2}_ / HS (erefl (S n)) (erefl c) (erefl h1) (erefl Q) (erefl J)=>//.
+- move=>? v h ???????? HE.
+  by case: {-1}_ / HE (erefl (PURE v, hunion h (hunion hj hf))).
+- move=>??????? IMM ??? EH ? EJ; rewrite EH EJ in IMM *.
+  by apply: (IMM hf hj).
 Qed.
 
 Lemma safe_immacc: forall n c h1 Q J l,
@@ -225,22 +242,25 @@ Lemma safe_immacc: forall n c h1 Q J l,
   immacc l c ->
   h1 l <> None.
 Proof.
-  intros. inv H.
-- contradiction.
-- eapply ACC; auto.
+move=>n c h1 Q J ? HS HI.
+case: {-1}_ {-2}_ {-2}_ _ {-2}_ / HS (erefl (S n)) (erefl c) (erefl h1) (erefl Q) (erefl J)=>//.
+- by move=>??????? EC; rewrite -EC /= in HI.
+by move=>?????? ACC ??? EC ???; apply: ACC; rewrite EC.
 Qed.
 
 Lemma safe_mono: forall n c h Q J,
   safe n c h Q J -> forall n', (n' <= n)%nat -> safe n' c h Q J.
 Proof.
-  induction n; intros.
-- replace n' with O by lia. constructor.
-- destruct n' as [ | n']. constructor. inv H.
-  + constructor; auto.
-  + constructor; auto; intros.
-    edestruct STEP as (h1' & hj' & A & B & C & D); eauto.
-    exists h1', hj'; intuition auto.
-    apply IHn; auto. lia.
+elim=>[|n IH] ???? HS n' H.
+- by rewrite leqn0 in H; move/eqP: H=>->.
+case: n' H=>[|n'] H; first by apply: safe_zero.
+case: {-2}_ _ _ _ _ / HS (erefl (S n))=>//.
+- by move=>???????; apply: safe_done.
+move=>???????? ST [EN] ; rewrite {}EN in ST.
+apply: safe_step=>// hf0 hj0 h0 c' h' ????.
+case: (ST hf0 hj0 h0 c' h')=>// h1'[hj'][?][?][?]?.
+exists h1', hj'; do!split=>//.
+by apply: IH.
 Qed.
 
 (** ** 2.3. The rules of concurrent separation logic *)
@@ -252,6 +272,22 @@ Lemma safe_frame:
   safe n c h Q J -> hdisjoint h h' -> R h' ->
   safe n c (hunion h h') (fun v => Q v ** R) J.
 Proof.
+move=>? Q J; elim=>[|n IH] c h h' HS ??.
+- by apply: safe_zero.
+case: {-1}_ {-2}_ {-1}_ _ _ / HS (erefl (S n)) (erefl c) (erefl h) (erefl Q) (erefl J)=>//.
+- move=>???????? EH ??; apply: safe_done.
+  by exists h, h'; do!split=>//; rewrite EH.
+move=>?????? ACC IMM ??? EH ??; apply: safe_step=>//.
+- move=>? HI; move: (ACC _ HI); rewrite -EH /hunion /=.
+  by case: (h _).
+- move=>hf hj ? D3 ->?; rewrite -EH in D3 *.
+  move: D3; rewrite /hdisj3 !hdisjoint_union_l; case; case=>??[[??]?].
+  apply: (IMM (hunion h' hf) hj)=>//; rewrite -EH.
+  - rewrite /hdisj3 !hdisjoint_union_r.
+    by do!split=>//; rewrite hdisjoint_sym.
+  rewrite hunion_assoc (hunion_comm _ h'); last by rewrite hdisjoint_union_l; split; rewrite hdisjoint_sym.
+  by rewrite hunion_assoc (hunion_comm h') // hdisjoint_sym.
+
   induction n; intros.
 - constructor.
 - inv H.
@@ -265,9 +301,9 @@ Proof.
     rewrite hunion_comm by HDISJ. rewrite hunion_assoc. f_equal.
     apply hunion_comm. HDISJ.
     auto.
-  * intros. subst h0. 
+  * intros. subst h0.
     edestruct (STEP (hunion h' hf) hj) as (h1' & hj' & A & B & C & D).
-    4: eauto. HDISJ. 
+    4: eauto. HDISJ.
     rewrite hunion_assoc. f_equal.
     rewrite hunion_comm by HDISJ. rewrite hunion_assoc. f_equal.
     apply hunion_comm. HDISJ.
@@ -286,7 +322,7 @@ Lemma triple_frame: forall J P c Q R,
   J ⊢ ⦃ P ⦄ c ⦃ Q ⦄ ->
   J ⊢ ⦃ P ** R ⦄ c ⦃ fun v => Q v ** R ⦄.
 Proof.
-  intros; red; intros. destruct H0 as (h1 & h2 & P1 & R2 & D & U). 
+  intros; red; intros. destruct H0 as (h1 & h2 & P1 & R2 & D & U).
   subst h. apply safe_frame; auto.
 Qed.
 
@@ -294,7 +330,7 @@ Qed.
 
 Lemma safe_frame_invariant:
   forall Q (J J': invariant) n c h,
-  safe n c h Q J -> 
+  safe n c h Q J ->
   safe n c h Q (J ** J').
 Proof.
   induction n; intros.
@@ -334,7 +370,7 @@ Lemma triple_atomic: forall J P c (Q: postcond),
   J ⊢ ⦃ P ⦄ ATOMIC c ⦃ Q ⦄.
 Proof.
   intros until Q; intros TR n h Ph. destruct n; constructor; auto.
-- intros. intro ST; inv ST. 
+- intros. intro ST; inv ST.
   apply star_starN in H4. destruct H4 as (N & STEPS).
   rewrite <- hunion_assoc in STEPS. rewrite <- (hunion_empty hf) in STEPS.
   edestruct safe_redN as (h1' & hj' & A & B & C & D).
@@ -357,7 +393,7 @@ Proof.
   exists h1'', hj''.
   split. HDISJ.
   split. rewrite hunion_assoc. rewrite C. rewrite hunion_empty. auto.
-  split. auto. 
+  split. auto.
   apply safe_pure. auto.
 Qed.
 
@@ -365,7 +401,7 @@ Qed.
 
 Lemma safe_share:
   forall Q (J J': invariant) n c h h',
-  safe n c h Q (J ** J') -> 
+  safe n c h Q (J ** J') ->
   hdisjoint h h' -> J' h' ->
   safe n c (hunion h h') (fun v => Q v ** J') J.
 Proof.
@@ -375,7 +411,7 @@ Proof.
   + constructor. exists h, h'; auto.
   + constructor; auto.
   * intros. apply ACC in H. cbn. destruct (h l); congruence.
-  * intros. apply (IMM hf (hunion h' hj)). HDISJ. 
+  * intros. apply (IMM hf (hunion h' hj)). HDISJ.
     subst h0. rewrite ! hunion_assoc. auto.
     rewrite hunion_comm by HDISJ. exists hj, h'; intuition auto. HDISJ.
   * intros.
@@ -419,12 +455,12 @@ Proof.
   induction n; intros until h; intros S1 S2.
 - constructor.
 - constructor; auto; intros.
-  + eapply safe_immacc; eauto. 
+  + eapply safe_immacc; eauto.
   + red; intros. inv H2. eelim safe_not_erroneous; eauto.
   + subst h0. inv H2.
     * exists h, hj; intuition auto. apply S2. eapply safe_pure_inv; eauto. lia.
     * edestruct safe_red as (h1' & hj' & A & B & C & D); eauto.
-      exists h1', hj'; intuition auto. 
+      exists h1', hj'; intuition auto.
 Qed.
 
 Lemma triple_let:
@@ -530,7 +566,7 @@ Proof.
     subst h'.
     exists (hunion h1' h2), hj'.
     split. HDISJ.
-    split. rewrite hunion_assoc. f_equal. rewrite <- (hunion_comm h2) by HDISJ. 
+    split. rewrite hunion_assoc. f_equal. rewrite <- (hunion_comm h2) by HDISJ.
     rewrite hunion_assoc. auto.
     split. assumption.
     apply IHn. auto. apply safe_mono with (S n); auto. HDISJ.
@@ -571,7 +607,7 @@ Proof.
 - cbn; intros. congruence.
 - intros. subst h0. intro ST; inv ST. cbn in H2. rewrite L in H2. congruence.
 - intros. subst h0. inv H2.
-  assert (v0 = v). 
+  assert (v0 = v).
   { cbn in H3. rewrite L in H3. congruence. }
   subst v0.
   exists h, hj; intuition auto.
@@ -589,14 +625,14 @@ Proof.
 - intros; intro ST; inv ST. cbn in H3. rewrite L in H3; congruence.
 - intros. subst h0. rewrite Ph in H. inv H2.
   exists (hupdate l v hempty), hj; intuition auto.
-  + HDISJ. 
+  + HDISJ.
     red; intros l0; generalize (H l0); cbn.
     destruct (Z.eq_dec l l0); intuition congruence.
     red; intros l0; generalize (H0 l0); cbn.
     destruct (Z.eq_dec l l0); intuition congruence.
   + rewrite Ph. apply heap_extensionality; intros l0; cbn.
     destruct (Z.eq_dec l l0); auto.
-  + apply safe_pure. reflexivity. 
+  + apply safe_pure. reflexivity.
 Qed.
 
 Fixpoint valid_N (l: addr) (sz: nat) : assertion :=
@@ -615,14 +651,14 @@ Proof.
   destruct (Z.eq_dec l x); auto.
   right. rewrite hinit_outside by lia. auto.
   apply heap_extensionality; intros x. cbn. destruct (Z.eq_dec l x); auto.
-Qed. 
+Qed.
 
 Lemma triple_alloc: forall J sz,
   J ⊢ ⦃ emp ⦄  ALLOC sz  ⦃ fun l => (l <> 0) //\\ valid_N l sz ⦄.
 Proof.
   intros J sz n h Ph. red in Ph; subst h.
   destruct n; constructor; auto.
-- intros; intro ST. inv ST. 
+- intros; intro ST. inv ST.
 - intros. rewrite hunion_empty in H0. subst h. inv H2.
   exists (hinit l sz hempty), hj; intuition auto.
   + assert (D: hdisjoint (hinit l sz hempty) (hunion hj hf)).
@@ -650,12 +686,12 @@ Proof.
 - intros; intro ST; inv ST. cbn in H3. rewrite L in H3; congruence.
 - intros. subst h0. rewrite Ph in H. inv H2.
   exists hempty, hj; intuition auto.
-  + HDISJ. 
+  + HDISJ.
   + assert (D: hdisjoint (hupdate l v0 hempty) (hunion hj hf)) by HDISJ.
     rewrite Ph. apply heap_extensionality; intros l0; cbn.
     destruct (Z.eq_dec l l0); auto.
     subst l0. destruct (D l); auto. rewrite hupdate_same in H0; congruence.
-  + apply safe_pure. reflexivity. 
+  + apply safe_pure. reflexivity.
 Qed.
 
 (** *** Structural rules *)
@@ -675,7 +711,7 @@ Lemma safe_consequence:
   safe n c h Q' J ->
   safe n c h Q J.
 Proof.
-  induction n; intros. 
+  induction n; intros.
 - constructor.
 - inv H0.
   + constructor. apply H; auto.
@@ -683,7 +719,7 @@ Proof.
     intros.
     edestruct STEP as (h1' & hj' & A & B & C & D); eauto.
     exists h1', hj'; intuition auto.
-Qed. 
+Qed.
 
 Lemma triple_consequence_post:
   forall Q' J P c Q,
@@ -722,7 +758,7 @@ Lemma safe_and: forall J Q Q',
   forall n c h,
   safe n c h Q J -> safe n c h Q' J -> safe n c h (fun v => aand (Q v) (Q' v)) J.
 Proof.
-  induction n; intros c h S S'. 
+  induction n; intros c h S S'.
 - constructor.
 - inv S; inv S'.
 + constructor; split; auto.
@@ -744,7 +780,7 @@ Proof.
   assert (h1' = h1'').
   { apply hunion_invert_l with (hunion hj' hf). congruence. HDISJ. HDISJ. }
   subst h1''.
-  exists h1', hj'; auto. 
+  exists h1', hj'; auto.
 Qed.
 
 Lemma triple_and: forall J P c Q P' Q',
@@ -786,11 +822,11 @@ Lemma triple_swap:
   sem_invariant lck R ⊢ ⦃ emp ⦄ SWAP lck 0 ⦃ fun v => if Z.eqb v 0 then emp else R ⦄.
 Proof.
   intros. apply triple_atomic.
-  rewrite sepconj_emp. unfold sem_invariant at 1. 
-  apply triple_exists_pre; intros v. 
+  rewrite sepconj_emp. unfold sem_invariant at 1.
+  apply triple_exists_pre; intros v.
   eapply triple_let with
   (Q := fun v' => ((v' = v) //\\ contains lck v) ** (if v =? 0 then emp else R)).
-  apply triple_frame. apply triple_get. 
+  apply triple_frame. apply triple_get.
   cbn. intros v'. rewrite lift_pureconj. apply triple_simple_conj_pre.
   intros EQ; subst v'.
   apply triple_seq with (Q := contains lck 0 ** (if v =? 0 then emp else R)).
@@ -807,7 +843,7 @@ Lemma triple_acquire:
   forall lck R,
   sem_invariant lck R ⊢ ⦃ emp ⦄ ACQUIRE lck ⦃ fun _ => R ⦄.
 Proof.
-  intros. 
+  intros.
   apply triple_consequence_post with (Q' := fun v => (v <> 0) //\\ (if Z.eqb v 0 then emp else R)).
   apply triple_repeat. apply triple_swap.
   rewrite Z.eqb_refl. red; auto.
@@ -821,14 +857,14 @@ Lemma triple_release:
 Proof.
   intros. apply triple_atomic.
   rewrite sepconj_comm. unfold sem_invariant at 1. rewrite lift_aexists.
-  apply triple_exists_pre. intros v. rewrite sepconj_assoc. 
+  apply triple_exists_pre. intros v. rewrite sepconj_assoc.
   apply triple_consequence_post with (Q' := fun _ => contains lck 1 ** (if v =? 0 then emp else R) ** R).
-  apply triple_frame. 
+  apply triple_frame.
   apply triple_consequence_pre with (valid lck). apply triple_set.
   red; intros. exists v; auto.
   intros _. intros h P.
   assert ((contains lck 1 ** R) h).
-  { eapply sepconj_imp_r; eauto. 
+  { eapply sepconj_imp_r; eauto.
     destruct (v =? 0).
     rewrite sepconj_emp. red; auto.
     apply sepconj_self; auto. }
@@ -1009,13 +1045,13 @@ Lemma triple_produce: forall R buff data,
 Proof.
   intros. eapply triple_let.
   { rewrite <- (sepconj_emp (R data)). apply triple_frame. apply triple_alloc. }
-  intros a; cbn. 
-  rewrite lift_pureconj. apply triple_simple_conj_pre; intros NOT0. 
+  intros a; cbn.
+  rewrite lift_pureconj. apply triple_simple_conj_pre; intros NOT0.
   rewrite ! sepconj_assoc, sepconj_emp.
   apply triple_seq with (contains a data ** valid (a + 1) ** R data).
   { apply triple_frame. apply triple_set. }
   apply triple_atomic.
-  rewrite sepconj_comm. unfold buffer_invariant. 
+  rewrite sepconj_comm. unfold buffer_invariant.
   rewrite lift_aexists; apply triple_exists_pre; intros l.
   rewrite lift_aexists; apply triple_exists_pre; intros p.
   rewrite sepconj_assoc.
@@ -1023,15 +1059,15 @@ Proof.
   { apply triple_frame. apply triple_get. }
   intros p'; cbn. rewrite lift_pureconj. apply triple_simple_conj_pre; intros EQ; subst p'.
   eapply triple_seq.
-  { rewrite (sepconj_pick3 (valid (a + 1))). rewrite sepconj_pick2. 
+  { rewrite (sepconj_pick3 (valid (a + 1))). rewrite sepconj_pick2.
     apply triple_frame with (Q := fun _ => contains  (a + 1) p).
     apply triple_set. }
   rewrite sepconj_pick2. eapply triple_consequence_post.
   { apply triple_frame. eapply triple_consequence_pre. apply triple_set.
     intros h A; exists p; auto. }
-  cbn. intros _. rewrite sepconj_emp. 
+  cbn. intros _. rewrite sepconj_emp.
   rewrite <- (sepconj_swap3 (list_invariant R l p)).
-  rewrite (sepconj_pick2 (contains a data)). 
+  rewrite (sepconj_pick2 (contains a data)).
   intros h A. exists (data :: l), a.
   revert h A. apply sepconj_imp_r.
   intros h A. cbn. split; auto. exists p; exact A.
@@ -1059,27 +1095,27 @@ Proof.
     eapply triple_let.
     { rewrite ! sepconj_assoc, sepconj_pick2. apply triple_frame. apply triple_get. }
     intros t'; cbn. rewrite lift_pureconj; apply triple_simple_conj_pre; intros E; subst t'.
-    rewrite <- ! sepconj_assoc, sepconj_comm, ! sepconj_assoc.  
+    rewrite <- ! sepconj_assoc, sepconj_comm, ! sepconj_assoc.
     eapply triple_seq.
     { apply triple_frame with (Q := fun _ => contains buff t).
-      eapply triple_consequence_pre. apply triple_set. 
+      eapply triple_consequence_pre. apply triple_set.
       intros h A; exists p; auto. }
      apply triple_pure.
      unfold Qloop. apply Z.eqb_neq in NOTZERO; rewrite NOTZERO.
-     rewrite (sepconj_pick2 (contains p x)). 
-     rewrite <- (sepconj_pick3 (contains buff t)). 
+     rewrite (sepconj_pick2 (contains p x)).
+     rewrite <- (sepconj_pick3 (contains buff t)).
      rewrite <- (sepconj_pick2 (contains buff t)).
      intros h A. rewrite lift_aexists. exists x. rewrite ! sepconj_assoc.
      eapply sepconj_imp_r; eauto.
      intros h' B. apply sepconj_imp_l with (P := contains (p + 1) t).
      intros h'' C. exists t; auto.
-     revert h' B. apply sepconj_imp_r. apply sepconj_imp_r. 
+     revert h' B. apply sepconj_imp_r. apply sepconj_imp_r.
      intros h''' D. red. exists l; exists t; auto.
   + apply triple_simple_conj_pre; intros ZERO.
     apply triple_pure. unfold Qloop; cbn. rewrite sepconj_emp. intros h A; exists l, p; auto.
 - unfold Qloop; cbn. red; auto.
 - unfold Qloop. intros v h [A B]. apply Z.eqb_neq in A. rewrite A in B. auto.
-Qed.  
+Qed.
 
 Lemma triple_consume: forall R buff,
   buffer_invariant R buff ⊢
@@ -1100,4 +1136,3 @@ Proof.
 Qed.
 
 End ProdCons2.
-
