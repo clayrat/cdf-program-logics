@@ -58,6 +58,8 @@ Proof.
 by move=>???? /=; case: eqP.
 Qed.
 
+Definition hsing (l: addr) (v: int) : heap := hupdate l v hempty.
+
 (** The heap [h] after deallocating address [l]. *)
 
 Program Definition hfree (l: addr) (h: heap) : heap :=
@@ -213,7 +215,10 @@ Definition pure (P: Prop) : assertion :=
     The domain of the heap must be the singleton [{l}]. *)
 
 Definition contains (l: addr) (v: int) : assertion :=
-  fun h => h = hupdate l v hempty.
+  fun h => h = hsing l v.
+
+Lemma contains_eq l v h : contains l v h -> h l = Some v.
+Proof. by move=>-> /=; rewrite eq_refl. Qed.
 
 (** The assertion "address [l] is valid" (i.e. in the domain of the heap). *)
 
