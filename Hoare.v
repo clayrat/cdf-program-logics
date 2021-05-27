@@ -528,9 +528,9 @@ Lemma Hoare_assign_inv: forall x a P Q,
 Proof.
 move=>x a ?? H.
 elim: _ {-1}_ _ /H (erefl (ASSIGN x a))=>//.
-- by move=>???; case=>->->.
-- move=>?????? IH H1 H2 ???.
-  by apply/H2/IH/H1.
+- by move=>???[->->].
+move=>?????? IH H1 H2 ???.
+by apply/H2/IH/H1.
 Qed.
 
 Lemma Hoare_seq_inv: forall c1 c2 P Q,
@@ -539,12 +539,12 @@ Lemma Hoare_seq_inv: forall c1 c2 P Q,
 Proof.
 move=>c1 c2 ?? H.
 elim: _ {-1}_ _ /H (erefl (c1;; c2))=>//.
-- move=>? Q2 ???????; case=>->->.
+- move=>? Q2 ???????[->->].
   by exists Q2.
-- move=>?????? IH H1 H2 ?; case: IH=>// R[C1]C2.
-  exists R; split.
-  - by apply/Hoare_consequence_pre/H1.
-  by apply/Hoare_consequence_post/H2.
+move=>?????? IH H1 H2 ?; case: IH=>// R[C1]C2.
+exists R; split.
+- by apply/Hoare_consequence_pre/H1.
+by apply/Hoare_consequence_post/H2.
 Qed.
 
 Lemma Hoare_ifthenelse_inv: forall b c1 c2 P Q,
@@ -553,13 +553,13 @@ Lemma Hoare_ifthenelse_inv: forall b c1 c2 P Q,
 Proof.
 move=>b c1 c2 ?? H.
 elim: _ {-1}_ _ /H (erefl (IFTHENELSE b c1 c2))=>//.
-- by move=>?????????; case=>->->->.
-- move=>?????? IH H1 H2 ?; case: IH=>// C1 C2.
-  split; apply/Hoare_consequence/H2.
-  - by exact: C1.
-  - by move=>?[?]?; split=>//; apply: H1.
-  - by exact: C2.
-  - by move=>?[?]?; split=>//; apply: H1.
+- by move=>?????????[->->->].
+move=>?????? IH H1 H2 ?; case: IH=>// C1 C2.
+split; apply/Hoare_consequence/H2.
+- by exact: C1.
+- by move=>?[?]?; split=>//; apply: H1.
+- by exact: C2.
+by move=>?[?]?; split=>//; apply: H1.
 Qed.
 
 Lemma Hoare_while_inv: forall b c P Q,
@@ -569,11 +569,11 @@ Lemma Hoare_while_inv: forall b c P Q,
 Proof.
 move=>b c ?? H.
 elim: _ {-1}_ _ /H (erefl (WHILE b c))=>//.
-- move=>R ????; case=>->->.
+- move=>R ????[->->].
   by exists R; do 2!split=>//.
-- move=>?????? IH H1 H2 ?.
-  case: IH=>// Inv [C][X]Y.
-  by exists Inv; split=>//; split=>?; [move/H1/X|move/Y/H2].
+move=>?????? IH H1 H2 ?.
+case: IH=>// Inv [C][X]Y.
+by exists Inv; split=>//; split=>?; [move/H1/X|move/Y/H2].
 Qed.
 
 Lemma Hoare_havoc_inv: forall x P Q,
@@ -581,9 +581,9 @@ Lemma Hoare_havoc_inv: forall x P Q,
 Proof.
 move=>x ?? H.
 elim: _ {-1}_ _ /H (erefl (HAVOC x))=>//.
-- by move=>??; case=>->.
-- move=>?????? IH H1 H2 ????.
-  by apply/H2/IH/H1.
+- by move=>??[->].
+move=>?????? IH H1 H2 ????.
+by apply/H2/IH/H1.
 Qed.
 
 Lemma Hoare_assert_inv: forall b P Q,
@@ -592,11 +592,11 @@ Lemma Hoare_assert_inv: forall b P Q,
 Proof.
 move=>b ?? H.
 elim: _ {-1}_ _ /H (erefl (ASSERT b)) =>//.
-- move=>R ?; case=>->.
+- move=>R ?[->].
   by exists R; split.
-- move=>?????? IH H1 H2 ?.
-  case: IH=>// R [A B].
-  by exists R; split=>?; [move/H1/A|move/B/H2].
+move=>?????? IH H1 H2 ?.
+case: IH=>// R [A B].
+by exists R; split=>?; [move/H1/A|move/B/H2].
 Qed.
 
 (** Some admissible rules. *)
@@ -976,14 +976,14 @@ have REC: forall v s, P s -> aeval var s = v ->
 - apply: well_founded_induction; first by exact: well_founded_rlt.
   move=>? /= IH s ? HA; apply: safe_step=>// c' s' R.
   case: {-2}_ {-1}_ / R (erefl (WHILE b c, s)) (erefl (c', s'))=>// ??? HB.
-  - case=>EB _ ES; case=>->->; rewrite {}EB {}ES in HB *.
+  - move=>[EB _ ES][->->]; rewrite {}EB {}ES in HB *.
     by apply: safe_now.
-  - case=>EB -> ES; case=>->->; rewrite {}EB {}ES in HB *.
-    apply: (@safe_seq (alessthan var (aeval var s) //\\ P)).
-    - move=>? [P1 ?]; apply: IH=>//.
-      by rewrite /alessthan HA in P1.
-    by apply: H.
-by move=>s ?; apply: REC.
+  move=>[EB->ES][->->]; rewrite {}EB {}ES in HB *.
+  apply: (@safe_seq (alessthan var (aeval var s) //\\ P)).
+  - move=>? [P1 ?]; apply: IH=>//.
+    by rewrite /alessthan HA in P1.
+  by apply: H.
+by move=>??; apply: REC.
 Qed.
 
 Lemma Triple_havoc: forall x Q,
@@ -1566,10 +1566,10 @@ elim=>/=.
 - by move=>? IH1 ? IH2 ?[??]; apply: Hoare_seq; [apply: IH1| apply: IH2].
 - move=>?? IH1 ? IH2 ?[??]; apply: Hoare_ifthenelse.
   - apply: Hoare_consequence_pre; first by apply: IH1.
-    move=> ?[B]; case; case=>//.
+    move=>?[B]; case; case=>//.
     by rewrite /afalse B.
   apply: Hoare_consequence_pre; first by apply: IH2.
-  move=> ?[B]; case; case=>// A.
+  move=>?[B]; case; case=>// A.
   by rewrite /afalse A in B.
 - move=>??? IH ?[?][?]; apply/Hoare_consequence_post/Hoare_while.
   by apply: Hoare_consequence_pre; first by apply: IH.

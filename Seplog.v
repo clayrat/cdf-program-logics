@@ -7,14 +7,6 @@ Import Order.Theory.
 Import GRing.Theory.
 Local Open Scope ring_scope.
 
-(*
-From Coq Require Import ZArith Lia Bool List Program.Equality.
-From Coq Require Import FunctionalExtensionality PropExtensionality.
-From CDF Require Import Sequences Separation.
-
-Local Open Scope Z_scope.
-*)
-
 (** * 1. A language of pointers *)
 
 (** We now define a small programming language to work with pointers to
@@ -189,11 +181,11 @@ Lemma red_frame: forall h2 c h1 c' h',
   exists h1', red (c, h1) (c', h1') /\ hdisjoint h1' h2 /\ h' = hunion h1' h2.
 Proof.
 move=>h2 ? h1 ? h' R; dependent induction R => I HD.
-- case: {-2}_ / I (erefl (PICK n, h1))=>// ??; case=>->->.
+- case: {-2}_ / I (erefl (PICK n, h1))=>// ?? [->->].
   by exists h1; do!split=>//; exact: red_pick.
-- case: {-2}_ / I (erefl (LET (PURE x) f, h1))=>// ??? I; case=>EC -> EH; rewrite {}EC {}EH in I *.
+- case: {-2}_ / I (erefl (LET (PURE x) f, h1))=>// ??? I [EC->EH]; rewrite {}EC {}EH in I *.
   by exists h1; do!split=>//; exact: red_let_done.
-- case: {-2}_ / I (erefl (LET c f, h1))=>// c0 ?? I; case=>EC -> EH; rewrite {}EC {}EH in I IHR *.
+- case: {-2}_ / I (erefl (LET c f, h1))=>// c0 ?? I [EC->EH]; rewrite {}EC {}EH in I IHR *.
   case: (IHR h2 c h1 c' h')=>// h3[?][?]?.
   by exists h3; do!split=>//; apply: red_let_step.
 - by exists h1; do!split=>//; exact: red_ifthenelse.
@@ -209,10 +201,10 @@ move=>h2 ? h1 ? h' R; dependent induction R => I HD.
   case: E=>?.
   - by rewrite !hinit_inside.
   - by rewrite !hinit_outside.
-- case: {-2}_ / I (erefl (GET l, h1))=>// ?? EQ; case=>EL EH; rewrite {}EL {}EH in EQ *.
+- case: {-2}_ / I (erefl (GET l, h1))=>// ?? EQ [EL EH]; rewrite {}EL {}EH in EQ *.
   exists h1; do!split=>//; apply: red_get.
   by move: H=>/=; case E: (h1 l).
-- case: {-2}_ / I (erefl (SET l v, h1))=>// ??? EQ; case=>EL -> EH; rewrite {}EL {}EH in EQ *.
+- case: {-2}_ / I (erefl (SET l v, h1))=>// ??? EQ [EL->EH]; rewrite {}EL {}EH in EQ *.
   exists (hupdate l v h1); do!split.
   - by apply: red_set.
   - move=>i; move: (HD i)=>/=; case=>?; try by right.
@@ -220,7 +212,7 @@ move=>h2 ? h1 ? h' R; dependent induction R => I HD.
     by move=>E; rewrite E in EQ.
   apply: heap_extensionality=>i /=.
   by case: eqP.
-- case: {-2}_ / I (erefl (FREE l, h1))=>// ?? EQ; case=>EL EH; rewrite {}EL {}EH in EQ *.
+- case: {-2}_ / I (erefl (FREE l, h1))=>// ?? EQ [EL EH]; rewrite {}EL {}EH in EQ *.
   exists (hfree l h1); do!split.
   - by apply: red_free.
   - move=>i; move: (HD i)=>/=; case=>?; [left| right]=>//.
@@ -331,7 +323,7 @@ Lemma safe_pure: forall v h Q,
 Proof.
 move=>v ?? S.
 case: {-2}_ _ _ / S (erefl (PURE v)).
-- by move=>????; case=><-.
+- by move=>???? [<-].
 by move=>??? NP ?? E; rewrite E in NP.
 Qed.
 
@@ -363,15 +355,15 @@ move=>Q ? f HP ?? S; elim: {-1}_ / S (erefl Q).
 - move=>v h1 ?? E; apply: safe_step=>//; first by apply/immsafe_let/immsafe_pure.
   move=>c' h' R.
   case: {-2}_ {-1}_ / R (erefl (LET (PURE v) f, h1)) (erefl (c', h'))=>//.
-  - move=>???; case=>->->->; case=>->->.
+  - move=>???[->->->][->->].
     by apply: HP; rewrite E.
-  move=>????? R; case=>EC->EH; case=>->->; rewrite {}EC {}EH in R.
+  move=>????? R [EC->EH][->->]; rewrite {}EC {}EH in R.
   by case: {-1}_ _ / R (erefl (PURE v, h1)).
 - move=>c1 h1 ? NP ?? H2 ?; apply: safe_step=>//; first by apply: immsafe_let.
   move=>c' h' R.
   case: {-2}_ {-1}_ / R (erefl (LET c1 f, h1)) (erefl (c', h'))=>//.
-  - by move=>???; case=>E; rewrite -E in NP.
-  move=>????? R; case=>EC->EH; case=>->->; rewrite {}EC {}EH in R.
+  - by move=>??? [E]; rewrite -E in NP.
+  move=>????? R [EC->EH][->->]; rewrite {}EC {}EH in R.
   by apply: H2.
 Qed.
 
@@ -410,8 +402,7 @@ Proof.
 move=>b c1 c2 ?? H1 H2 h ?; apply: safe_step=>//.
 - by exact: immsafe_ifthenelse.
 move=>c' h' R.
-case: {-2}_ {-1}_ / R (erefl (IFTHENELSE b c1 c2, h)) (erefl (c', h'))=>// ????.
-case=>->->->->; case=>->->.
+case: {-2}_ {-1}_ / R (erefl (IFTHENELSE b c1 c2, h)) (erefl (c', h'))=>// ???? [->->->->][->->].
 by case: eqP=>?; [apply: H2|apply: H1].
 Qed.
 
@@ -431,8 +422,7 @@ Lemma triple_pick: forall n,
 Proof.
 move=>n h ?; apply: safe_step=>//; first by exact: immsafe_pick.
 move=>c' h' R.
-case: {-2}_ {-1}_ / R (erefl (PICK n, h)) (erefl (c', h'))=>// ??? LE.
-case=>EN->; case=>->->; rewrite {}EN in LE.
+case: {-2}_ {-1}_ / R (erefl (PICK n, h)) (erefl (c', h'))=>// ??? LE [EN->][->->]; rewrite {}EN in LE.
 by apply: safe_done.
 Qed.
 
