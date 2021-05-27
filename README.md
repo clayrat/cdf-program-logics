@@ -18,5 +18,5 @@ An HTML pretty-printing of the commented sources is also available:
    * Module [CSL](https://xavierleroy.org/cdf-program-logics/CDF.CSL.html): concurrent separation logic for the PTR language + parallel and atomic constructs.
 
 4. Hoare monads and Dijkstra monads
-   * Library [Delay](https://xavierleroy.org/cdf-program-logics/CDF.Delay.html) (coinductive definition of possibly nonterminating computations).
+   * Library [Delay](https://xavierleroy.org/cdf-program-logics/CDF.Delay.html): coinductive definition of possibly nonterminating computations.
    * Module [Monads](https://xavierleroy.org/cdf-program-logics/CDF.Monads.html)
