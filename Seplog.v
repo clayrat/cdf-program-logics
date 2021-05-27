@@ -262,8 +262,8 @@ have L: h l = Some v by rewrite P hupdate_same.
 apply: safe_step=>//.
 - by apply: immsafe_get; rewrite L.
 move=>c' h' R.
-case: {-2}_ {-1}_ / R (erefl (GET l, h)) (erefl (c', h'))=>// ??? E.
-case=>EL EH; case=>->->; rewrite {}EL {}EH in E *; rewrite {}E in L; case: L=>->.
+case: {-2}_ {-1}_ / R (erefl (GET l, h)) (erefl (c', h'))=>// ??? E [EL EH][->->];
+rewrite {}EL {}EH in E *; rewrite {}E in L; case: L=>->.
 by apply: safe_done.
 Qed.
 
@@ -271,12 +271,10 @@ Lemma triple_set: forall l v,
   ⦃ valid l ⦄ SET l v ⦃ fun _ => contains l v ⦄.
 Proof.
 move=>l v h [v0 P].
-have L: h l = Some v0 by rewrite P /= eq_refl.
 apply: safe_step=>//.
-- by apply: immsafe_set; rewrite L.
+- by apply: immsafe_set; move/contains_eq: P=>->.
 move=>c' h' R.
-case: {-2}_ {-1}_ / R (erefl (SET l v, h)) (erefl (c', h'))=>// ??? E.
-case=>EL -> EH; case=>->->; rewrite {}EL {}EH in E *.
+case: {-2}_ {-1}_ / R (erefl (SET l v, h)) (erefl (c', h'))=>// ??? E [EL->EH][->->]; rewrite {}EL {}EH in E *.
 apply: safe_done; rewrite P.
 apply: heap_extensionality=>? /=.
 by case: eqP.
@@ -291,7 +289,7 @@ Proof.
 elim=>/=.
 - by rewrite /emp.
 - move=>sz ? l.
-  exists (hupdate l 0 hempty), (hinit (l + 1) sz hempty); do!split=>//.
+  exists (hsing l 0), (hinit (l + 1) sz hempty); do!split=>//.
   - by exists 0.
   - move=>? /=; case: eqP=>E; [right|left]=>//.
     by rewrite -E hinit_outside //; lia.
@@ -307,8 +305,7 @@ move=>sz ?->.
 apply: safe_step=>//.
 - by apply: (immsafe_alloc _ _ 1).
 move=>c' h' R.
-case: {-2}_ {-1}_ / R (erefl (ALLOC sz, hempty)) (erefl (c', h'))=>// ??? H ?.
-case=>ES EH; case=>->->; rewrite {}ES {}EH in H *.
+case: {-2}_ {-1}_ / R (erefl (ALLOC sz, hempty)) (erefl (c', h'))=>// ??? H ?[ES EH][->->]; rewrite {}ES {}EH in H *.
 apply: safe_done; split=>//.
 by exact: valid_N_init.
 Qed.
@@ -319,12 +316,10 @@ Lemma triple_free: forall l,
   ⦃ fun _ => emp ⦄.
 Proof.
 move=>l h [v0 P].
-have L: h l = Some v0 by rewrite P /= eq_refl.
 apply: safe_step=>//.
-- by apply: immsafe_free; rewrite L.
+- by apply: immsafe_free; move/contains_eq: P=>->.
 move=>c' h' R.
-case: {-2}_ {-1}_ / R (erefl (FREE l, h)) (erefl (c', h'))=>// ?? E.
-case=>ES EH; case=>->->; rewrite {}ES {}EH in E *.
+case: {-2}_ {-1}_ / R (erefl (FREE l, h)) (erefl (c', h'))=>// ?? E [ES EH][->->]; rewrite {}ES {}EH in E *.
 rewrite P; apply: safe_done.
 by apply: heap_extensionality=>? /=; case: eqP.
 Qed.
@@ -370,8 +365,8 @@ move=>Q ? f HP ?? S; elim: {-1}_ / S (erefl Q).
   case: {-2}_ {-1}_ / R (erefl (LET (PURE v) f, h1)) (erefl (c', h'))=>//.
   - move=>???; case=>->->->; case=>->->.
     by apply: HP; rewrite E.
-  - move=>????? R; case=>EC->EH; case=>->->; rewrite {}EC {}EH in R.
-    by case: {-1}_ _ / R (erefl (PURE v, h1)).
+  move=>????? R; case=>EC->EH; case=>->->; rewrite {}EC {}EH in R.
+  by case: {-1}_ _ / R (erefl (PURE v, h1)).
 - move=>c1 h1 ? NP ?? H2 ?; apply: safe_step=>//; first by apply: immsafe_let.
   move=>c' h' R.
   case: {-2}_ {-1}_ / R (erefl (LET c1 f, h1)) (erefl (c', h'))=>//.
@@ -745,10 +740,10 @@ Lemma triple_frame: forall P c Q R,
   ⦃ P ⦄ c ⦃ Q ⦄ ->
   ⦃ P ** R ⦄ c ⦃ fun v => Q v ** R ⦄.
 Proof.
-  intros P c Q R TR R'. rewrite sepconj_assoc.
-  replace (fun v => (Q v ** R) ** R') with (fun v => Q v ** (R ** R')).
-  apply TR.
-  apply functional_extensionality; intros. rewrite sepconj_assoc; auto.
+move=>?? Q R TR R' ?.
+rewrite sepconj_assoc=>?.
+rewrite (_ : (fun v => (Q v ** R) ** R') = (fun v => Q v ** (R ** R'))); first by apply: TR.
+by apply: functional_extensionality=>?; rewrite sepconj_assoc.
 Qed.
 
 (** It also validates the "small rules" for heap operations. *)
@@ -756,50 +751,51 @@ Qed.
 Lemma triple_get: forall l v,
   ⦃ contains l v ⦄ GET l ⦃ fun v' => (v' = v) //\\ contains l v ⦄.
 Proof.
-  intros l v R h (h1 & h2 & H1 & H2 & D & U).
-  assert (L1: h1 l = Some v).
-  { red in H1. subst h1. apply hupdate_same. }
-  assert (L: h l = Some v).
-  { intros. rewrite U; simpl. rewrite L1; auto. }
-  constructor; auto.
-  - constructor. congruence.
-  - intros c' h' RED. inv RED. constructor.
-    exists h1, h2. unfold pureconj. intuition congruence.
+move=>l v ? h[h1][h2][H1][?][?]E.
+have L: h l = Some v by rewrite E /=; move/contains_eq: H1=>->.
+apply: safe_step=>//.
+- by apply: immsafe_get; rewrite L.
+move=>c' h' R.
+case: {-2}_ {-1}_ / R (erefl (GET l, h)) (erefl (c', h'))=>// ??? E2 [EL EH][->->];
+rewrite {}EL {}EH in E2 *; rewrite {}E2 in L; case: L=>->.
+apply: safe_done; rewrite E.
+by exists h1, h2.
 Qed.
 
 Lemma triple_set: forall l v,
   ⦃ valid l ⦄ SET l v ⦃ fun _ => contains l v ⦄.
 Proof.
-  intros l v R h (h1 & h2 & H1 & H2 & D & U).
-  destruct H1 as (v0 & H1). red in H1.
-  assert (L1: h1 l = Some v0).
-  { subst h1; apply hupdate_same. }
-  assert (L: h l = Some v0).
-  { rewrite U; cbn. rewrite L1; auto. }
-  constructor; auto.
-  - constructor. congruence.
-  - intros c' h' RED. inv RED. constructor.
-    exists (hupdate l v hempty), h2.
-    split. red. auto.
-    split. auto.
-    split. intro l'. specialize (D l'). cbn in *. destruct D; auto. destruct (Z.eq_dec l l'); auto. congruence.
-    apply heap_extensionality; intros l'; cbn. destruct (Z.eq_dec l l'); auto.
+move=>l v ? h [h1][h2][[v0 H1]][?][D]E.
+have L: h l = Some v0 by rewrite E /=; move/contains_eq: H1=>->.
+apply: safe_step=>//.
+- by apply: immsafe_set; rewrite L.
+rewrite /contains in H1.
+move=>c' h' R.
+case: {-2}_ {-1}_ / R (erefl (SET l v, h)) (erefl (c', h'))=>// ??? _ [->->->][->->]; rewrite E.
+apply: safe_done.
+exists (hsing l v), h2; do!split=>//.
+- move=>/= l'; case: (D l')=>EH1; last by right.
+  case: eqP=>EL; last by left.
+  by move: EH1; rewrite -EL; move/contains_eq: H1=>->.
+apply: heap_extensionality=>? /=; case: ifP=>//=.
+by rewrite H1 /= =>->.
 Qed.
 
 Remark valid_N_init:
   forall (R: assertion) sz l h,
   R h ->
-  (forall i, l <= i < l + Z.of_nat sz -> h i = None) ->
+  (forall i, l <= i < l + sz%:Z -> h i = None) ->
   (valid_N l sz ** R) (hinit l sz h).
 Proof.
-  induction sz as [ | sz]; intros l h Rh EMPTY; cbn.
-- rewrite sepconj_emp. auto.
-- rewrite sepconj_assoc. exists (hupdate l 0 hempty), (hinit (l + 1) sz h).
-  split. exists 0. red; auto.
-  split. apply IHsz. auto. intros. apply EMPTY. lia.
-  split. intros x. unfold hupdate, hempty; cbn. destruct (Z.eq_dec l x); auto.
-  right. rewrite hinit_outside by lia. apply EMPTY; lia.
-  apply heap_extensionality; intros x. cbn. destruct (Z.eq_dec l x); auto.
+move=>?; elim=>[| sz IH] l h ? HE /=.
+- by rewrite sepconj_emp.
+rewrite sepconj_assoc.
+exists (hsing l 0), (hinit (l + 1) sz h); do!split.
+- by exists 0.
+- by apply: IH=>// ??; apply: HE; lia.
+- move=>? /=; case: eqP; [move=><-;right|left]=>//.
+  by rewrite hinit_outside; [apply: HE|]; lia.
+by apply: heap_extensionality=>? /=; case: eqP.
 Qed.
 
 Lemma triple_alloc: forall sz,
@@ -807,13 +803,15 @@ Lemma triple_alloc: forall sz,
   ALLOC sz
   ⦃ fun l => (l <> 0) //\\ valid_N l sz ⦄.
 Proof.
-  intros sz R h H. rewrite sepconj_emp in H.
-  constructor; auto.
-- destruct (isfinite h) as (l0 & FIN). apply immsafe_alloc with (Z.max l0 1); intros.
-  + lia.
-  + apply FIN. lia.
-- intros c' h' RED; inv RED. constructor.
-  rewrite lift_pureconj; split. auto. apply valid_N_init; auto.
+move=>sz ? h; rewrite sepconj_emp => ?.
+apply: safe_step=>//.
+- case: (isfinite h)=>l0 F.
+  apply: (immsafe_alloc _ _ (Num.max l0 1)); first by lia.
+  by move=>??; apply: F; lia.
+move=>c' h' R.
+case: {-2}_ {-1}_ / R (erefl (ALLOC sz, h)) (erefl (c', h'))=>// ??? F ? [ES EH][->->]; rewrite {}ES {}EH in F *.
+apply: safe_done; rewrite lift_pureconj; split=>//.
+by exact: valid_N_init.
 Qed.
 
 Lemma triple_free: forall l,
@@ -821,18 +819,16 @@ Lemma triple_free: forall l,
   FREE l
   ⦃ fun _ => emp ⦄.
 Proof.
-  intros l R h (h1 & h2 & H1 & H2 & D & U).
-  destruct H1 as (v0 & H1).
-  assert (L1: h1 l = Some v0).
-  { rewrite H1. apply hupdate_same. }
-  assert (L: h l = Some v0).
-  { rewrite U; cbn. rewrite L1. auto. }
-  constructor; auto.
-- constructor. congruence.
-- intros c' h' RED; inv RED. constructor. rewrite sepconj_emp.
-  replace (hfree l (hunion h1 h2)) with h2; auto.
-  apply heap_extensionality; intros x. generalize (D x); rewrite H1; cbn.
-  destruct (Z.eq_dec l x); auto. intuition congruence.
+move=>l ? h [h1][h2][[v0 H1]][?][D]E.
+have L: h l = Some v0 by rewrite E /=; move/contains_eq: H1=>->.
+apply: safe_step=>//.
+- by apply: immsafe_free; rewrite L.
+move=>c' h' R.
+case: {-2}_ {-1}_ / R (erefl (FREE l, h)) (erefl (c', h'))=>// ?? H [EL EH][->->]; rewrite {}EL {}EH in H *.
+apply: safe_done; rewrite sepconj_emp E.
+rewrite (_ : hfree l (hunion h1 h2) = h2) //.
+apply: heap_extensionality=>l'.
+by case: (D l'); rewrite H1 /=; case: eqP=>/=.
 Qed.
 
 (** The rules for control structures are also valid.
@@ -843,14 +839,14 @@ Lemma Hoare_pure: forall P v (Q: postcond),
   P -->> Q v ->
   Hoare P (PURE v) Q.
 Proof.
-  intros; intros h Ph. constructor. apply H; auto.
+by move=>??? H ??; apply/safe_done/H.
 Qed.
 
 Lemma triple_pure: forall P v (Q: postcond),
   P -->> Q v ->
   ⦃ P ⦄ PURE v ⦃ Q ⦄.
 Proof.
-  intros; intros R. apply Hoare_pure. apply sepconj_imp_l; auto.
+by move=>?????; apply/Hoare_pure/sepconj_imp_l.
 Qed.
 
 Lemma Hoare_let:
@@ -859,8 +855,8 @@ Lemma Hoare_let:
   (forall v, Hoare (Q v) (f v) R) ->
   Hoare P (LET c f) R.
 Proof.
-  intros until R; intros HR1 HR2 h Ph.
-  apply safe_let with Q. apply HR2. apply HR1. auto.
+move=>??? Q ? H1 H2 ??.
+by apply: (safe_let Q); [apply: H2 | apply: H1].
 Qed.
 
 Lemma triple_let:
@@ -869,10 +865,8 @@ Lemma triple_let:
   (forall v, ⦃ Q v ⦄ f v ⦃ R ⦄) ->
   ⦃ P ⦄ LET c f ⦃ R ⦄.
 Proof.
-  intros c f P Q R TR1 TR2 R'.
-  apply Hoare_let with (fun v => Q v ** R').
-  apply TR1.
-  intros. apply TR2.
+move=>??? Q ? H1 H2 R'.
+by apply: (Hoare_let _ _ _ (fun v => Q v ** R')); [apply: H1 | move=>?; apply: H2].
 Qed.
 
 Lemma Hoare_ifthenelse: forall b c1 c2 P Q,
@@ -880,11 +874,11 @@ Lemma Hoare_ifthenelse: forall b c1 c2 P Q,
   Hoare ((b = 0) //\\ P) c2 Q ->
   Hoare P (IFTHENELSE b c1 c2) Q.
 Proof.
-  intros until Q; intros HR1 HR2 h Ph. constructor; auto.
-- constructor.
-- intros c' h' RED; inv RED. destruct (Z.eqb_spec b 0).
-  + apply HR2. split; auto.
-  + apply HR1. split; auto.
+move=>b c1 c2 ?? H1 H2 h ?.
+apply: safe_step=>//; first by apply: immsafe_ifthenelse.
+move=>c' h' R.
+case: {-2}_ {-1}_ / R (erefl (IFTHENELSE b c1 c2, h)) (erefl (c', h'))=>// ????[->->->->][->->].
+by case: eqP=>?; [apply: H2|apply: H1].
 Qed.
 
 Lemma triple_ifthenelse: forall b c1 c2 P Q,
@@ -892,8 +886,7 @@ Lemma triple_ifthenelse: forall b c1 c2 P Q,
   ⦃ (b = 0) //\\ P ⦄ c2 ⦃ Q ⦄ ->
   ⦃ P ⦄ IFTHENELSE b c1 c2 ⦃ Q ⦄.
 Proof.
-  intros b c1 c2 P Q TR1 TR2 R.
-  apply Hoare_ifthenelse; rewrite <- lift_pureconj; auto.
+by move=>????????; apply: Hoare_ifthenelse; rewrite -lift_pureconj.
 Qed.
 
 Lemma Hoare_consequence: forall P P' c Q' Q,
@@ -901,7 +894,7 @@ Lemma Hoare_consequence: forall P P' c Q' Q,
   P -->> P' -> (forall v, Q' v -->> Q v) ->
   Hoare P c Q.
 Proof.
-  intros; red; intros. apply safe_consequence with Q'; auto.
+by move=>??? Q' ? H H1 ???; apply/(safe_consequence Q')/H/H1.
 Qed.
 
 Lemma triple_consequence: forall P P' c Q' Q,
@@ -909,18 +902,18 @@ Lemma triple_consequence: forall P P' c Q' Q,
   P -->> P' -> (forall v, Q' v -->> Q v) ->
   ⦃ P ⦄ c ⦃ Q ⦄.
 Proof.
-  intros; red; intros. apply Hoare_consequence with (P' ** R) (fun v => Q' v ** R).
-  apply H.
-  apply sepconj_imp_l; auto.
-  intros; apply sepconj_imp_l; auto.
+move=>? P' ? Q' ???? R; apply: (Hoare_consequence _ (P' ** R) _ (fun v => Q' v ** R)) => //.
+- by apply: sepconj_imp_l.
+by move=>?; apply: sepconj_imp_l.
 Qed.
 
 Lemma Hoare_pick: forall P n,
   Hoare P (PICK n) (fun i => (0 <= i < n) //\\ P).
 Proof.
-  intros P n h Ph. constructor; auto.
-- constructor.
-- intros c' h' RED; inv RED. constructor. split; auto.
+move=>? n h ?; apply: safe_step=>//; first by exact: immsafe_pick.
+move=>c' h' R.
+case: {-2}_ {-1}_ / R (erefl (PICK n, h)) (erefl (c', h'))=>// ??? H [EN->][->->]; rewrite {}EN in H.
+by apply: safe_done.
 Qed.
 
 Lemma triple_pick: forall n,
@@ -928,9 +921,9 @@ Lemma triple_pick: forall n,
   PICK n
   ⦃ fun i => pure (0 <= i < n) ⦄.
 Proof.
-  intros; intros R. rewrite sepconj_emp. eapply Hoare_consequence with (P' := R). apply Hoare_pick.
-  red; auto.
-  intros; red; intros. rewrite pureconj_sepconj. auto.
+move=>? R; rewrite sepconj_emp.
+apply: (Hoare_consequence _ R)=>//; first by exact: Hoare_pick.
+by move=>???; rewrite pureconj_sepconj.
 Qed.
 
 End AlternateSeplog.
@@ -947,7 +940,7 @@ Lemma triple_frame_consequence: forall R P c Q P' Q',
   (forall v, Q v ** R -->> Q' v) ->
   ⦃ P' ⦄ c ⦃ Q' ⦄.
 Proof.
-  intros. apply triple_consequence with (P ** R) (fun v => Q v ** R); auto. apply triple_frame; auto.
+by move=>??????? H1 H2; apply/triple_consequence/H2/H1/triple_frame.
 Qed.
 
 (** This rule still needs the user to guess the framing predicate [R].
@@ -959,11 +952,10 @@ Lemma triple_ramification: forall P c Q P' Q',
   P' -->> P ** (aforall (fun v => Q v --* Q' v)) ->
   ⦃ P' ⦄ c ⦃ Q' ⦄.
 Proof.
-  intros. eapply triple_frame_consequence with (R := aforall (fun v => Q v --* Q' v)).
-  eassumption.
-  assumption.
-  intros v h (h1 & h2 & Q1 & W2 & D & U).
-  apply (wand_cancel (Q v)). exists h1, h2; auto.
+move=>P ? Q ? Q' ??.
+apply: (triple_frame_consequence (aforall (fun v => Q v --* Q' v)) P _ Q)=>//.
+move=>v ?[h1][h2][?][?][?]->; apply: (wand_cancel (Q v)).
+by exists h1, h2.
 Qed.
 
 (** * 6. Weakest preconditions *)
@@ -980,18 +972,14 @@ Definition wp (c: com) (Q: postcond) : precond :=
 
 Lemma wp_precond: forall c Q,
   ⦃ wp c Q ⦄ c ⦃ Q ⦄.
-Proof.
-  intros c Q h (P & T & C). apply T. auto.
-Qed.
+Proof. by move=>???[?][T]?; apply: T. Qed.
 
 (** ... and it is implied by any other precondition. *)
 
 Lemma wp_weakest: forall P c Q,
   ⦃ P ⦄ c ⦃ Q ⦄ ->
   P -->> wp c Q.
-Proof.
-  intros P c Q T h Ph. exists P; split; auto.
-Qed.
+Proof. by move=>P ?????; exists P. Qed.
 
 (** This leads to the following alternate definition of triples in terms
     of weakest preconditions. *)
@@ -999,9 +987,10 @@ Qed.
 Corollary wp_equiv: forall P c Q,
   ⦃ P ⦄ c ⦃ Q ⦄ <-> (P -->> wp c Q).
 Proof.
-  intros; split; intros.
-- apply wp_weakest; auto.
-- apply triple_consequence_pre with (wp c Q); auto using wp_precond.
+move=>? c Q; split=>?? H2.
+- by apply/wp_weakest/H2.
+apply/(triple_consequence_pre _ (wp c Q))/H2=>//.
+by exact: wp_precond.
 Qed.
 
 (** Here is another definition of the weakest precondition, using the
@@ -1012,16 +1001,12 @@ Definition wp' (c: com) (Q: postcond) : precond :=
 
 Lemma wp'_precond: forall c Q,
   ⦃ wp' c Q ⦄ c ⦃ Q ⦄.
-Proof.
-  intros c Q h SAFE. apply SAFE.
-Qed.
+Proof. by move=>???; apply. Qed.
 
 Lemma wp'_weakest: forall P c Q,
   ⦃ P ⦄ c ⦃ Q ⦄ ->
   P -->> wp' c Q.
-Proof.
-  intros; intros h Ph. apply H. auto.
-Qed.
+Proof. by move=>??? H ??; apply: H. Qed.
 
 (** ** 6.2. Structural rules for weakest preconditions *)
 
@@ -1029,125 +1014,110 @@ Lemma wp_consequence: forall (Q Q': postcond) c,
   (forall v, Q v -->> Q' v) ->
   wp c Q -->> wp c Q'.
 Proof.
-  intros. apply wp_weakest. apply triple_consequence_post with Q; auto using wp_precond.
+move=>Q ???; apply/wp_weakest/(triple_consequence_post _ _ _ Q)=>//.
+by exact: wp_precond.
 Qed.
 
 Lemma wp_frame: forall R c Q,
   wp c Q ** R -->> wp c (fun v => Q v ** R).
-Proof.
-  intros. apply wp_weakest. apply triple_frame. apply wp_precond.
-Qed.
+Proof. by move=>???; apply/wp_weakest/triple_frame/wp_precond. Qed.
 
 Corollary wp_frame_consequence: forall R Q c Q',
   (forall v, Q v ** R -->> Q' v) ->
   wp c Q ** R -->> wp c Q'.
 Proof.
-  intros; red; intros. apply wp_consequence with (fun v => Q v ** R). assumption.
-  apply wp_frame; auto.
+move=>???? H ??; apply: wp_consequence; first by exact: H.
+by apply: wp_frame.
 Qed.
 
 Corollary wp_ramification: forall c Q Q',
   wp c Q ** aforall (fun v => Q v --* Q' v) -->> wp c Q'.
 Proof.
-  intros. apply wp_frame_consequence.
-  intros v h (h1 & h2 & A & B & D & U). apply (wand_cancel (Q v)). exists h1, h2; auto.
+move=>? Q ?; apply: wp_frame_consequence=>v ?[h1][h2][?][?][?]->.
+apply: (wand_cancel (Q v)).
+by exists h1, h2.
 Qed.
 
 (** ** 6.3.  Weakest precondition rules for our language of pointers *)
 
 Lemma wp_pure: forall (Q: postcond) v,
   Q v -->> wp (PURE v) Q.
-Proof.
-  intros. apply wp_weakest. apply triple_pure. red; auto.
-Qed.
+Proof. by move=>??? H; apply/wp_weakest/H/triple_pure. Qed.
 
 Lemma wp_let: forall c f Q,
   wp c (fun v => wp (f v) Q) -->> wp (LET c f) Q.
 Proof.
-  intros. apply wp_weakest. eapply triple_let.
-  apply wp_precond.
-  intros. apply wp_precond.
+move=>????; apply/wp_weakest/triple_let; first by exact: wp_precond.
+by move=>?; apply: wp_precond.
 Qed.
 
 Lemma wp_ifthenelse: forall b c1 c2 Q,
-  (if b =? 0 then wp c2 Q else wp c1 Q) -->> wp (IFTHENELSE b c1 c2) Q.
+  (if b == 0 then wp c2 Q else wp c1 Q) -->> wp (IFTHENELSE b c1 c2) Q.
 Proof.
-  intros. apply wp_weakest. apply triple_ifthenelse.
-- apply triple_consequence_pre with (wp c1 Q). apply wp_precond.
-  intros h (A & B). rewrite <- Z.eqb_neq in A. rewrite A in B. auto.
-- apply triple_consequence_pre with (wp c2 Q). apply wp_precond.
-  intros h (A & B). subst b. auto.
+move=>? c1 c2 Q; apply/wp_weakest/triple_ifthenelse.
+- apply: (triple_consequence_pre _ (wp c1 Q)); first by exact: wp_precond.
+  by move=>?[/eqP/negbTE->].
+apply: (triple_consequence_pre _ (wp c2 Q)); first by exact: wp_precond.
+by move=>?[/eqP->].
 Qed.
 
 Lemma wp_alloc: forall sz Q,
   aforall (fun l => (l <> 0) //\\ valid_N l sz --* Q l) -->> wp (ALLOC sz) Q.
 Proof.
-  intros; red; intros.
-  apply wp_ramification with (Q := fun l => (l <> 0) //\\ valid_N l sz).
-  apply sepconj_imp_l with emp.
-  apply wp_weakest. apply triple_alloc.
-  rewrite sepconj_emp. assumption.
+move=>sz ???.
+apply: (wp_ramification _ (fun l => (l <> 0) //\\ valid_N l sz)).
+apply: (sepconj_imp_l emp).
+- by apply/wp_weakest/triple_alloc.
+by rewrite sepconj_emp.
 Qed.
 
 Lemma wp_get: forall l v Q,
   contains l v ** (contains l v --* Q v) -->> wp (GET l) Q.
 Proof.
-  intros.
-  assert (W: contains l v -->> wp (GET l) (fun v' => (v' = v) //\\ contains l v)).
-  { apply wp_weakest. apply triple_get. }
-  intros; red; intros.
-  eapply wp_ramification. eapply sepconj_imp_l. eexact W.
-  eapply sepconj_imp_r. 2: eexact H.
-  intros h' H' v' h'' D (A & B). subst v'. apply H'; auto.
+move=>l v ?? H.
+have W: contains l v -->> wp (GET l) (fun v' => (v' = v) //\\ contains l v)
+  by apply/wp_weakest/triple_get.
+apply/wp_ramification/sepconj_imp_l; first by exact: W.
+apply/sepconj_imp_r/H => ? H2 ???[->?].
+by apply: H2.
 Qed.
 
 Lemma wp_set: forall l v Q,
   valid l ** aforall (fun v' => (contains l v --* Q v')) -->> wp (SET l v) Q.
 Proof.
-  intros.
-  assert (W: valid l -->> wp (SET l v) (fun _ => contains l v)).
-  { apply wp_weakest. apply triple_set. }
-  intros; red; intros.
-  eapply wp_ramification. eapply sepconj_imp_l. eexact W.
-  eapply sepconj_imp_r. 2: eexact H.
-  red; auto.
+move=>l v ?? H.
+have W: valid l -->> wp (SET l v) (fun _ => contains l v)
+  by apply/wp_weakest/triple_set.
+apply/wp_ramification/sepconj_imp_l; first by exact: W.
+by apply/sepconj_imp_r/H.
 Qed.
 
 Corollary wp_set': forall l v Q,
   valid l ** (contains l v --* Q) -->> wp (SET l v) (fun _ => Q).
-Proof.
-  intros; red; intros. apply wp_set. eapply sepconj_imp_r; eauto.
-  intros h' H' v'. auto.
-Qed.
+Proof. by move=>???? H; apply/wp_set/sepconj_imp_r/H=>??. Qed.
 
 Lemma wp_free: forall l Q,
   valid l ** aforall (fun v' => Q v') -->> wp (FREE l) Q.
 Proof.
-  intros.
-  assert (W: valid l -->> wp (FREE l) (fun _ => emp)).
-  { apply wp_weakest. apply triple_free. }
-  intros; red; intros.
-  eapply wp_ramification. eapply sepconj_imp_l. eexact W.
-  eapply sepconj_imp_r. 2: eexact H.
-  red; intros. intros v h' D E. rewrite E in *. rewrite hunion_comm, hunion_empty by HDISJ.
-  apply H0.
+move=>l ?? H.
+have W: valid l -->> wp (FREE l) (fun _ => emp)
+ by apply/wp_weakest/triple_free.
+apply/wp_ramification/sepconj_imp_l; first by exact: W.
+apply/sepconj_imp_r/H=>???? H2 E.
+rewrite E in H2 *; move/hdisjoint_sym: H2=>H2.
+by rewrite hunion_comm // hunion_empty.
 Qed.
 
 Corollary wp_free': forall l Q,
   valid l ** Q -->> wp (FREE l) (fun _ => Q).
-Proof.
-  intros; red; intros. apply wp_free. eapply sepconj_imp_r; eauto.
-  intros h' H' v'. auto.
-Qed.
+Proof. by move=>??? H; apply/wp_free/sepconj_imp_r/H=>??. Qed.
 
 Lemma wp_pick: forall n Q,
   aforall (fun i => pure (0 <= i < n) --* Q i) -->> wp (PICK n) Q.
 Proof.
-  intros.
-  assert (W: emp -->> wp (PICK n) (fun i => pure (0 <= i < n))).
-  { apply wp_weakest. apply triple_pick. }
-  intros; red; intros.
-  eapply wp_ramification. eapply sepconj_imp_l. eexact W.
-  eapply sepconj_imp_r. 2: rewrite sepconj_emp; eexact H.
-  red; auto.
+move=>n ?? H.
+have W: emp -->> wp (PICK n) (fun i => pure (0 <= i < n))
+  by apply/wp_weakest/triple_pick.
+apply/wp_ramification/sepconj_imp_l; first by exact: W.
+by apply: sepconj_imp_r; last by rewrite sepconj_emp; exact: H.
 Qed.
