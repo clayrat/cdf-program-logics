@@ -35,7 +35,7 @@ Inductive com: Type :=
   | FREE (l: addr).                  (**r free one word of storage *)
 
 Definition not_pure (c : com) :=
-  match c with PURE _ => false | _ => true end.
+  if c is PURE _ then false else true.
 
 (** Some derived forms. *)
 
@@ -274,56 +274,43 @@ Lemma safe_frame:
 Proof.
 move=>? Q J; elim=>[|n IH] c h h' HS ??.
 - by apply: safe_zero.
-case: {-1}_ {-2}_ {-1}_ _ _ / HS (erefl (S n)) (erefl c) (erefl h) (erefl Q) (erefl J)=>//.
-- move=>???????? EH ??; apply: safe_done.
-  by exists h, h'; do!split=>//; rewrite EH.
-move=>?????? ACC IMM ??? EH ??; apply: safe_step=>//.
-- move=>? HI; move: (ACC _ HI); rewrite -EH /hunion /=.
+case: {-2}_ _ {-2}_ {-2}_ {-2}_ / HS (erefl (S n)) (erefl h) (erefl Q) (erefl J)=>//.
+- move=>??????? EH ??; apply: safe_done.
+  by exists h, h'; do!split=>//; rewrite -EH.
+move=>?????? ACC IMM ST [EN] EH EQ EJ; apply: safe_step=>//.
+- move=>? HI; move: (ACC _ HI); rewrite EH /hunion /=.
   by case: (h _).
-- move=>hf hj ? D3 ->?; rewrite -EH in D3 *.
+- move=>hf hj ? D3 ->?; rewrite EH in D3 *.
   move: D3; rewrite /hdisj3 !hdisjoint_union_l; case; case=>??[[??]?].
-  apply: (IMM (hunion h' hf) hj)=>//; rewrite -EH.
+  apply: (IMM (hunion h' hf) hj)=>//; rewrite EH.
   - rewrite /hdisj3 !hdisjoint_union_r.
     by do!split=>//; rewrite hdisjoint_sym.
-  rewrite hunion_assoc (hunion_comm _ h'); last by rewrite hdisjoint_union_l; split; rewrite hdisjoint_sym.
+  rewrite hunion_assoc (hunion_comm _ h');
+    last by rewrite hdisjoint_union_l; split; rewrite hdisjoint_sym.
   by rewrite hunion_assoc (hunion_comm h') // hdisjoint_sym.
-
-  induction n; intros.
-- constructor.
-- inv H.
-  + constructor. exists h, h'; auto.
-  + constructor; auto.
-  * intros. apply ACC in H. cbn. destruct (h l); congruence.
-  * intros. subst h0.
-    apply (IMM (hunion h' hf) hj).
-    HDISJ.
-    rewrite hunion_assoc. f_equal.
-    rewrite hunion_comm by HDISJ. rewrite hunion_assoc. f_equal.
-    apply hunion_comm. HDISJ.
-    auto.
-  * intros. subst h0.
-    edestruct (STEP (hunion h' hf) hj) as (h1' & hj' & A & B & C & D).
-    4: eauto. HDISJ.
-    rewrite hunion_assoc. f_equal.
-    rewrite hunion_comm by HDISJ. rewrite hunion_assoc. f_equal.
-    apply hunion_comm. HDISJ.
-    auto.
-    subst h'0.
-    exists (hunion h1' h'), hj'.
-    split. HDISJ.
-    split. rewrite hunion_assoc. f_equal.
-    rewrite hunion_comm by HDISJ. rewrite hunion_assoc. f_equal.
-    apply hunion_comm. HDISJ.
-    split. assumption.
-    apply IHn; auto. HDISJ.
+move=>hf hj ??? D3 ->? R; rewrite EH in R D3.
+move: D3; rewrite /hdisj3 !hdisjoint_union_l; case; case=>??[[??]?].
+case: (ST (hunion h' hf) hj _ _ _ _ _ _ R)=>//; rewrite ?EH.
+- rewrite /hdisj3 !hdisjoint_union_r.
+  by do!split=>//; rewrite hdisjoint_sym.
+- rewrite hunion_assoc (hunion_comm _ h');
+    last by rewrite hdisjoint_union_l; split; rewrite hdisjoint_sym.
+  by rewrite hunion_assoc (hunion_comm h').
+move=>h1'[hj'][D3'][E'][?]S'; rewrite E' in R.
+move: D3'; rewrite /hdisj3 !hdisjoint_union_r; case=>?[[??][??]].
+exists (hunion h1' h'), hj'; do!split=>//.
+- by rewrite hdisjoint_union_l; split=>//; rewrite hdisjoint_sym.
+- by rewrite hdisjoint_union_l.
+- by rewrite E' hunion_assoc -(hunion_assoc h') (hunion_comm hj' h') // hunion_assoc.
+by rewrite EN EQ EJ in S' *; apply: IH.
 Qed.
 
 Lemma triple_frame: forall J P c Q R,
   J ⊢ ⦃ P ⦄ c ⦃ Q ⦄ ->
   J ⊢ ⦃ P ** R ⦄ c ⦃ fun v => Q v ** R ⦄.
 Proof.
-  intros; red; intros. destruct H0 as (h1 & h2 & P1 & R2 & D & U).
-  subst h. apply safe_frame; auto.
+move=>????? H ??[?][?][?][?][?]->.
+by apply: safe_frame=>//; apply: H.
 Qed.
 
 (** *** The frame rule for invariants *)
@@ -333,34 +320,35 @@ Lemma safe_frame_invariant:
   safe n c h Q J ->
   safe n c h Q (J ** J').
 Proof.
-  induction n; intros.
-- constructor.
-- inv H.
-  + constructor; auto.
-  + constructor; auto.
-  * intros. destruct H1 as (hj1 & hj2 & A & B & C & D). subst hj h0.
-    apply (IMM (hunion hj2 hf) hj1).
-    HDISJ.
-    f_equal. rewrite hunion_assoc. auto.
-    auto.
-  * intros. destruct H1 as (hj1 & hj2 & A & B & C & D). subst hj h0.
-    edestruct (STEP (hunion hj2 hf) hj1) as (h1' & hj1' & U & V & X & Y).
-    4: eauto. HDISJ.
-    f_equal. rewrite hunion_assoc. auto.
-    auto.
-    subst h'.
-    exists h1', (hunion hj1' hj2).
-    split. HDISJ.
-    split. f_equal. rewrite hunion_assoc. auto.
-    split. exists hj1', hj2; intuition auto. HDISJ.
-    apply IHn; auto.
+move=>Q J ?; elim=>[|n IH] c h HS; first by apply: safe_zero.
+case: {-2}_ _ _ {-2}_ {-2}_ / HS (erefl (S n)) (erefl Q) (erefl J)=>//.
+- by move=>?????????; apply: safe_done.
+move=>??????? IMM ST [EN] EQ EJ; apply: safe_step=>//.
+- move=>hf ?? D3 ->[hj1][hj2][?][?][?] EHJ; rewrite {}EHJ in D3 *.
+  move: D3; rewrite /hdisj3 !hdisjoint_union_r !hdisjoint_union_l; case; case=>??[?[??]].
+  apply: (IMM (hunion hj2 hf) hj1)=>//.
+  - by rewrite /hdisj3 !hdisjoint_union_r.
+  by rewrite hunion_assoc.
+move=>hf ???? D3 ->[hj1][hj2][?][?][?] EHJ R; rewrite {}EHJ in D3 R.
+move: D3; rewrite /hdisj3 !hdisjoint_union_r !hdisjoint_union_l; case; case=>??[?[??]].
+case: (ST (hunion hj2 hf) hj1 _ _ _ _ _ _ R)=>//.
+- by rewrite /hdisj3 !hdisjoint_union_r.
+- by rewrite hunion_assoc.
+move=>h1'[hj1'][D3'][EH'][?] S; rewrite {}EH' in R *.
+move: D3'; rewrite /hdisj3 !hdisjoint_union_r; case=>?[[??][??]].
+exists h1', (hunion hj1' hj2); do!split=>//.
+- by rewrite hdisjoint_union_r.
+- by rewrite hdisjoint_union_l.
+- by rewrite hunion_assoc.
+- by exists hj1', hj2.
+by rewrite {}EQ {}EJ {}EN in S *; apply IH.
 Qed.
 
 Lemma triple_frame_invariant: forall J J' P c Q,
   J ⊢ ⦃ P ⦄ c ⦃ Q ⦄ ->
   J ** J' ⊢ ⦃ P ⦄ c ⦃ Q ⦄.
 Proof.
-  intros; red; intros. apply safe_frame_invariant; auto.
+by move=>????? H ???; apply/safe_frame_invariant/H.
 Qed.
 
 (** *** Atomic commands *)
@@ -369,32 +357,33 @@ Lemma triple_atomic: forall J P c (Q: postcond),
   emp ⊢ ⦃ P ** J ⦄ c ⦃ fun v => Q v ** J ⦄ ->
   J ⊢ ⦃ P ⦄ ATOMIC c ⦃ Q ⦄.
 Proof.
-  intros until Q; intros TR n h Ph. destruct n; constructor; auto.
-- intros. intro ST; inv ST.
-  apply star_starN in H4. destruct H4 as (N & STEPS).
-  rewrite <- hunion_assoc in STEPS. rewrite <- (hunion_empty hf) in STEPS.
-  edestruct safe_redN as (h1' & hj' & A & B & C & D).
-  eexact STEPS.
-  apply TR. exists h, hj. intuition auto. HDISJ.
-  reflexivity.
-  HDISJ.
-  eelim safe_not_erroneous. eexact D. eexact A. eauto. subst h'; auto.
-- intros. inv H2.
-  apply star_starN in H4. destruct H4 as (N & STEPS).
-  rewrite <- hunion_assoc in STEPS. rewrite <- (hunion_empty hf) in STEPS.
-  edestruct safe_redN as (h1' & hj' & A & B & C & D).
-  eexact STEPS.
-  apply TR. exists h, hj. intuition auto. HDISJ.
-  reflexivity.
-  HDISJ.
-  subst h'.
-  apply safe_pure_inv in D. destruct D as (h1'' & hj'' & U & V & X & Y).
-  subst h1'.
-  exists h1'', hj''.
-  split. HDISJ.
-  split. rewrite hunion_assoc. rewrite C. rewrite hunion_empty. auto.
-  split. auto.
-  apply safe_pure. auto.
+move=>J ? c Q TR n h ?; elim: n; first by exact: safe_zero.
+move=>??; apply: safe_step=>//.
+- move=>hf hj ? D3 -> ? HE.
+  move: D3; rewrite /hdisj3; case=>?[??].
+  case: {-2}_ / HE (erefl (ATOMIC c, hunion h (hunion hj hf)))=>//???? S HER [EC EH]; rewrite {}EC {}EH in S.
+  case: (star_starN S)=>n1; rewrite -hunion_assoc -(hunion_empty hf) => SS.
+  case: (safe_redN _ _ _ (fun v => Q v ** J) emp _ _ _ _ SS).
+  - by apply: TR; exists h, hj.
+  - by rewrite /emp.
+  - by rewrite /hdisj3 !hdisjoint_union_l; do!split=>//; try by [left|right].
+  move=>?[?][D3][EH'][?] HS; rewrite {}EH' in HER.
+  by apply: (safe_not_erroneous _ _ _ _ _ _ _ HS D3).
+move=>hf hj ? c' h' D3 ->? R.
+move: D3; rewrite {1}/hdisj3; case=>?[??].
+case: {-2}_ {-1}_ / R (erefl (ATOMIC c, hunion h (hunion hj hf))) (erefl (c', h'))=>// ???? S [EC EH][->->].
+  rewrite {}EC {}EH in S.
+case: (star_starN S)=>n1; rewrite -hunion_assoc -(hunion_empty hf) => {S}SS.
+case: (safe_redN _ _ _ (fun v => Q v ** J) emp _ _ _ _ SS).
+- by apply: TR; exists h, hj.
+- by rewrite /emp.
+- by rewrite /hdisj3 !hdisjoint_union_l; do!split=>//; try by [left|right].
+move=>h1'[hj'][D3][EH'][HE] HS; rewrite {}EH' in SS *.
+case: (safe_pure_inv _ _ _ _ _ HS)=>{HS}h1''[hj''][?][?][?]EH''; rewrite {}EH'' in D3 SS *.
+move: D3; rewrite {1}/hdisj3 !hdisjoint_union_l; case; case=>??[[??]?].
+exists h1'', hj''; do!split=>//.
+- by rewrite hunion_assoc HE hunion_empty.
+by apply: safe_pure.
 Qed.
 
 (** *** Sharing some state in the invariant *)
@@ -405,62 +394,74 @@ Lemma safe_share:
   hdisjoint h h' -> J' h' ->
   safe n c (hunion h h') (fun v => Q v ** J') J.
 Proof.
-  induction n; intros.
-- constructor.
-- inv H.
-  + constructor. exists h, h'; auto.
-  + constructor; auto.
-  * intros. apply ACC in H. cbn. destruct (h l); congruence.
-  * intros. apply (IMM hf (hunion h' hj)). HDISJ.
-    subst h0. rewrite ! hunion_assoc. auto.
-    rewrite hunion_comm by HDISJ. exists hj, h'; intuition auto. HDISJ.
-  * intros.
-    edestruct (STEP hf (hunion h' hj)) as (h1' & hj' & U & V & X & Y).
-    4: eauto.
-    HDISJ.
-    subst h0. rewrite ! hunion_assoc. auto.
-    rewrite hunion_comm by HDISJ. exists hj, h'; intuition auto. HDISJ.
-    destruct X as (hj1' & hj2' & A & B & C & D).
-    subst hj' h'0 h0.
-    exists (hunion h1' hj2'), hj1'.
-    split. HDISJ.
-    split. rewrite (hunion_comm hj2') by HDISJ. rewrite ! hunion_assoc. auto.
-    split. auto.
-    apply IHn; auto. HDISJ.
+move=>Q J J'; elim=>[|n IH] ? h h' HS ??; first by exact: safe_zero.
+case: {-2}_ _ {-2}_ {-2}_ {-2}_ / HS (erefl (S n)) (erefl h) (erefl Q) (erefl (J ** J'))=>//.
+- move=>????? HQ ? EH ??; rewrite {}EH in HQ *.
+  by apply: safe_done; exists h, h'.
+move=>?????? ACC IMM ST [EN] EH EQ EJ; rewrite {}EH {}EJ in IMM ACC ST *.
+apply: safe_step=>//.
+- by move=>? /ACC /=; case: (h _).
+- move=>hf hj ? D3 ->?.
+  move: D3; rewrite {1}/hdisj3 !hdisjoint_union_l; case; case=>??[[??]?].
+  apply: (IMM hf (hunion h' hj)).
+  - by rewrite {1}/hdisj3 hdisjoint_union_l hdisjoint_union_r; do!split=>//; rewrite hdisjoint_sym.
+  - by rewrite !hunion_assoc.
+  - rewrite hunion_comm; last by rewrite hdisjoint_sym.
+    by exists hj, h'; do!split=>//; rewrite hdisjoint_sym.
+move=>hf hj ??? D3 ->? R.
+move: D3; rewrite {1}/hdisj3 !hdisjoint_union_l; case; case=>??[[??]?].
+case: (ST hf (hunion h' hj) _ _ _ _ _ _ R).
+- by rewrite {1}/hdisj3 hdisjoint_union_l hdisjoint_union_r.
+- by rewrite !hunion_assoc.
+- rewrite hunion_comm; last by rewrite hdisjoint_sym.
+  by exists hj, h'; do!split=>//; rewrite hdisjoint_sym.
+move=>h1'[?][D3][EH'][[hj1'][hj2'][?][?][?]EX] S; rewrite {}EH' {}EX in R D3 *.
+move: D3; rewrite {1}/hdisj3 hdisjoint_union_l hdisjoint_union_r; case; case=>??[?][??].
+exists (hunion h1' hj2'), hj1'; do!split=>//.
+- by rewrite hdisjoint_union_l; split=>//; rewrite hdisjoint_sym.
+- by rewrite hdisjoint_union_l; split=>//; rewrite hdisjoint_sym.
+- rewrite !hunion_assoc (hunion_comm _ hj2'); last by rewrite hdisjoint_sym.
+  rewrite -(hunion_assoc hj1') (hunion_comm hj2') // hdisjoint_union_r; split=>//.
+  by rewrite hdisjoint_sym.
+by rewrite EN EQ in S *; apply: IH.
 Qed.
 
 Lemma triple_share: forall J J' P c Q,
   J ** J' ⊢ ⦃ P ⦄ c ⦃ Q ⦄ ->
   J ⊢ ⦃ P ** J' ⦄ c ⦃ fun v => Q v ** J' ⦄.
 Proof.
- intros; intros n h (h1 & h2 & Ph1 & J'h2 & D & U). subst h.
-  apply safe_share; auto.
+move=>????? H ??[?][?][?][?][?]->; apply: safe_share=>//.
+by apply: H.
 Qed.
 
 (** *** Sequential commands *)
 
 Lemma triple_pure: forall J P Q v,
-  aimp P (Q v) ->
+  P -->> Q v ->
   J ⊢ ⦃ P ⦄ PURE v ⦃ Q ⦄.
-Proof.
-  intros J P Q v IMP n h Ph. apply safe_pure; auto.
-Qed.
+Proof. by move=>???? H ???; apply/safe_pure/H. Qed.
 
 Lemma safe_let:
   forall (Q R: postcond) (J: invariant) f n c h,
   safe n c h Q J ->
-  (forall v n' h', Q v h' -> (n' < n)%nat -> safe n' (f v) h' R J) ->
+  (forall v n' h', Q v h' -> (n' < n)%N -> safe n' (f v) h' R J) ->
   safe n (LET c f) h R J.
 Proof.
-  induction n; intros until h; intros S1 S2.
-- constructor.
-- constructor; auto; intros.
-  + eapply safe_immacc; eauto.
-  + red; intros. inv H2. eelim safe_not_erroneous; eauto.
-  + subst h0. inv H2.
-    * exists h, hj; intuition auto. apply S2. eapply safe_pure_inv; eauto. lia.
-    * edestruct safe_red as (h1' & hj' & A & B & C & D); eauto.
-      exists h1', hj'; intuition auto.
+move=>??? f; elim=>[|n IH] c h S1 S2; first by exact: safe_zero.
+apply: safe_step=>//.
+- by move=>? /=; apply/safe_immacc/S1.
+- move=>?? h1 D3 EH ? HE.
+  case: {-2}_ / HE (erefl (LET c f, h1))=>// ??? HE [EC ? EH1]; rewrite {}EC {}EH1 {}EH in HE.
+  by apply: (safe_not_erroneous _ _ _ _ _ _ _ S1 D3).
+move=>hf hj ? c' h' ? -> ? R.
+case: {-2}_ {-1}_ / R (erefl (LET c f, hunion h (hunion hj hf))) (erefl (c', h'))=>//.
+- move=>??? [EC ->->][->->].
+  exists h, hj; do!split=>//.
+  by apply: S2=>//; apply: safe_pure_inv; rewrite EC; exact: S1.
+move=>????? R [EC->EF][->->]; rewrite {}EC {}EF in R.
+case: (safe_red _ _ _ _ _ _ _ _ _ R S1)=>// h1'[hj'][?][->][?]?.
+exists h1', hj'; do!split=>//.
+by apply: IH=>// ?????; apply/S2/ltnW.
 Qed.
 
 Lemma triple_let:
@@ -469,9 +470,8 @@ Lemma triple_let:
   (forall v, J ⊢ ⦃ Q v ⦄ f v ⦃ R ⦄) ->
   J ⊢ ⦃ P ⦄ LET c f ⦃ R ⦄.
 Proof.
-  intros; red; intros. apply safe_let with Q.
-  apply H; auto.
-  intros; apply H0; auto.
+move=>???? Q ? H H0 ???; apply: (safe_let Q); first by apply: H.
+by move=>?????; apply: H0.
 Qed.
 
 Corollary triple_seq:
@@ -479,49 +479,52 @@ Corollary triple_seq:
   J ⊢ ⦃ P ⦄ c1 ⦃ fun _ => Q ⦄ ->
   J ⊢ ⦃ Q ⦄ c2 ⦃ R ⦄ ->
   J ⊢ ⦃ P ⦄ SEQ c1 c2 ⦃ R ⦄.
-Proof.
-  intros. apply triple_let with (fun _ => Q); auto.
-Qed.
+Proof. by move=>?????? H ?; apply: triple_let; first by exact: H. Qed.
 
 (** *** Conditionals and loops *)
 
 Lemma safe_ifthenelse:
   forall n b c1 c2 h Q J,
-  (b <> 0 -> safe n c1 h Q J) ->
-  (b = 0  -> safe n c2 h Q J) ->
+  (b != 0 -> safe n c1 h Q J) ->
+  (b == 0 -> safe n c2 h Q J) ->
   safe (S n) (IFTHENELSE b c1 c2) h Q J.
 Proof.
-  intros. constructor; auto; intros.
-- intro ST; inv ST.
-- inv H4. exists h, hj; intuition auto. destruct (Z.eqb_spec b 0); auto.
+move=>? b c1 c2 h ????; apply: safe_step=>//.
+- move=>?? h1 ??? HE.
+  by case: {-1}_ / HE (erefl (IFTHENELSE b c1 c2, h1)).
+move=>hf hj ? c' h' ? -> ? R.
+case: {-2}_ {-1}_ / R (erefl (IFTHENELSE b c1 c2, hunion h (hunion hj hf))) (erefl (c', h'))=>// ???? [->->->->][->->].
+exists h,hj; do!split=>//.
+by case/boolP: (_ == _).
 Qed.
 
 Lemma triple_ifthenelse: forall J b c1 c2 P Q,
-  J ⊢ ⦃ (b <> 0) //\\ P ⦄ c1 ⦃ Q ⦄ ->
-  J ⊢ ⦃ (b = 0) //\\ P ⦄ c2 ⦃ Q ⦄ ->
+  J ⊢ ⦃ (b != 0) //\\ P ⦄ c1 ⦃ Q ⦄ ->
+  J ⊢ ⦃ (b == 0) //\\ P ⦄ c2 ⦃ Q ⦄ ->
   J ⊢ ⦃ P ⦄ IFTHENELSE b c1 c2 ⦃ Q ⦄.
 Proof.
-  intros; red; intros.
-  destruct n. constructor. apply safe_ifthenelse.
-- intros. apply H. split; auto.
-- intros. apply H0. split; auto.
+move=>?????? H1 H2 n ??; case: n; first by exact: safe_zero.
+by move=>?; apply: safe_ifthenelse=>?; [apply: H1| apply: H2].
 Qed.
 
 Lemma triple_repeat: forall J P c Q,
   J ⊢ ⦃ P ⦄ c ⦃ Q ⦄ ->
-  aimp (Q 0) P ->
-  J ⊢ ⦃ P ⦄ REPEAT c ⦃ fun v => (v <> 0) //\\ Q v ⦄.
+  Q 0 -->> P ->
+  J ⊢ ⦃ P ⦄ REPEAT c ⦃ fun v => (v != 0) //\\ Q v ⦄.
 Proof.
-  intros J P c Q TR IMP. red; induction n; intros h Ph.
-- constructor.
-- constructor; auto.
-  + intros; intro ST. inv ST.
-  + intros. inv H2. exists h, hj; intuition auto.
-    apply safe_let with Q.
-    * apply TR; auto.
-    * intros. destruct n'. constructor. apply safe_ifthenelse.
-      ** intros. destruct n'; constructor. split; auto.
-      ** intros. apply safe_mono with n. apply IHn. apply IMP. congruence. lia.
+move=>?? c Q H1 H2; elim=>[|n IH] h ?; first by exact: safe_zero.
+apply: safe_step=>//.
+- move=>?? h1 ??? HE.
+  by case: {-1}_ / HE (erefl (REPEAT c, h1)).
+move=>hf hj ? c' h' ? -> ? R.
+case: {-2}_ {-1}_ / R (erefl (REPEAT c, hunion h (hunion hj hf))) (erefl (c', h'))=>// ?? [->->][->->].
+exists h,hj; do!split=>//.
+apply: (safe_let Q); first by apply: H1.
+move=>?; case=>[|n'] ?? Hn; first by exact: safe_zero.
+apply: safe_ifthenelse=>EV.
+- by case: n' Hn=>[?|??]; [exact: safe_zero|apply: safe_done].
+apply: (safe_mono n); last by do 2!apply: ltnW.
+by apply/IH/H2; move/eqP: EV=><-.
 Qed.
 
 (** *** Parallel composition *)

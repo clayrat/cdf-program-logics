@@ -45,7 +45,7 @@ CoInductive com: Type :=
   | PICK (n: int).                      (**r pick a number between 0 and [n] *)
 
 Definition not_pure (c : com) :=
-  match c with PURE _ => false | _ => true end.
+  if c is PURE _ then false else true.
 
 (** Some derived forms. *)
 
