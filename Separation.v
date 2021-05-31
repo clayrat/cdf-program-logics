@@ -133,6 +133,12 @@ Proof.
 by move=>?; apply: heap_extensionality.
 Qed.
 
+Lemma hunion_empty_r:
+  forall h, hunion h hempty = h.
+Proof.
+by move=>h; apply: heap_extensionality=>? /=; case: (h _).
+Qed.
+
 Lemma hdisjoint_empty:
   forall h, hdisjoint h h -> h = hempty.
 Proof.

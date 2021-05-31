@@ -1095,7 +1095,7 @@ have W: valid l -->> wp (FREE l) (fun _ => emp)
 apply/wp_ramification/sepconj_imp_l; first by exact: W.
 apply/sepconj_imp_r/H=>???? H2 E.
 rewrite E in H2 *; move/hdisjoint_sym: H2=>H2.
-by rewrite hunion_comm // hunion_empty.
+by rewrite hunion_empty_r.
 Qed.
 
 Corollary wp_free': forall l Q,
