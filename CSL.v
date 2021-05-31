@@ -718,51 +718,47 @@ Qed.
 
 Lemma safe_consequence:
   forall (Q Q': postcond) (J: invariant),
-  (forall v, aimp (Q' v) (Q v)) ->
+  (forall v, Q' v -->> Q v) ->
   forall n c h,
   safe n c h Q' J ->
   safe n c h Q J.
 Proof.
-  induction n; intros.
-- constructor.
-- inv H0.
-  + constructor. apply H; auto.
-  + constructor; auto.
-    intros.
-    edestruct STEP as (h1' & hj' & A & B & C & D); eauto.
-    exists h1', hj'; intuition auto.
+move=>? Q' J HQ; elim=>[|n IH] c ? HS; first by exact: safe_zero.
+case: {-2}_ _ _ {-2}_ {-2}_ / HS (erefl (S n)) (erefl Q') (erefl J)=>//.
+- move=>????? H ? EQ ?; rewrite {}EQ in H.
+  by apply/safe_done/HQ.
+- move=>???????? ST [EN] EQ EJ.
+  apply: safe_step=>// ????? D3 -> ? R.
+  case: (ST _ _ _ _ _ D3 _ _ R)=>// h1'[hj'][?][?][?] S.
+  exists h1', hj'; do!split=>//.
+  rewrite {}EN {}EJ {}EQ in S *.
+  by apply: IH.
 Qed.
 
 Lemma triple_consequence_post:
   forall Q' J P c Q,
   J ⊢ ⦃ P ⦄ c ⦃ Q' ⦄ ->
-  (forall v, aimp (Q' v) (Q v)) ->
+  (forall v, Q' v -->> Q v) ->
   J ⊢ ⦃ P ⦄ c ⦃ Q ⦄.
-Proof.
-  intros. intros n h Ph. apply safe_consequence with Q'; auto.
-Qed.
+Proof. by move=>????? H ????; apply/safe_consequence/H. Qed.
 
 Lemma triple_exists_pre: forall {X: Type} J (P: X -> assertion) c Q,
   (forall v, J ⊢ ⦃ P v ⦄ c ⦃ Q ⦄) ->
   J ⊢ ⦃ aexists P ⦄ c ⦃ Q ⦄.
-Proof.
-  intros. intros n h Ph. destruct Ph as (v & Ph). apply (H v). auto.
-Qed.
+Proof. by move=>????? H ??[v ?]; apply: (H v). Qed.
 
 Lemma triple_simple_conj_pre: forall J (P1: Prop) P2 c Q,
   (P1 -> J ⊢ ⦃ P2 ⦄ c ⦃ Q ⦄) ->
   J ⊢ ⦃ P1 //\\ P2 ⦄ c ⦃ Q ⦄.
-Proof.
-  intros. intros n h Ph. destruct Ph. apply H; auto.
-Qed.
+Proof. by move=>????? H ??[??]; apply: H. Qed.
 
 Lemma triple_or: forall J P c Q P' Q',
   J ⊢ ⦃ P ⦄ c ⦃ Q ⦄ -> J ⊢ ⦃ P' ⦄ c ⦃ Q' ⦄ ->
   J ⊢ ⦃ aor P P' ⦄ c ⦃ fun v => aor (Q v) (Q' v) ⦄.
 Proof.
-  intros until Q'; intros TR1 TR2 n h [Ph | P'h].
-- apply safe_consequence with Q. intros v1 h1; red; auto. apply TR1; auto.
-- apply safe_consequence with Q'. intros v1 h1; red; auto. apply TR2; auto.
+move=>?????? H1 H2 ??[?|?].
+- by apply/safe_consequence/H1=>// ???; left.
+- by apply/safe_consequence/H2=>// ???; right.
 Qed.
 
 Lemma safe_and: forall J Q Q',
@@ -770,39 +766,44 @@ Lemma safe_and: forall J Q Q',
   forall n c h,
   safe n c h Q J -> safe n c h Q' J -> safe n c h (fun v => aand (Q v) (Q' v)) J.
 Proof.
-  induction n; intros c h S S'.
-- constructor.
-- inv S; inv S'.
-+ constructor; split; auto.
-+ contradiction.
-+ contradiction.
-+ constructor; auto.
-* intros.
-  edestruct STEP as (h1' & hj' & D' & E' & J' & SAFE'); eauto.
-  edestruct STEP0 as (h1'' & hj'' & D'' & E'' & J'' & SAFE''); eauto.
-  assert (hj' = hj'').
-  { apply H with (hunion h1' hf) (hunion h1'' hf); auto.
-    HDISJ. HDISJ.
-    rewrite ! (hunion_comm hf) by HDISJ.
-    rewrite <- ! hunion_assoc.
-    rewrite (hunion_comm h1'), (hunion_comm h1'') by HDISJ.
-    congruence.
-  }
-  subst hj''.
-  assert (h1' = h1'').
-  { apply hunion_invert_l with (hunion hj' hf). congruence. HDISJ. HDISJ. }
-  subst h1''.
-  exists h1', hj'; auto.
+move=>J Q Q' HP; elim=>[|n IH] c h HS1 HS2; first by exact: safe_zero.
+case: {-2}_ {-2}_ {-2}_ {-2}_ {-2}_ / HS1 (erefl (S n)) (erefl c) (erefl h) (erefl Q)  (erefl J)=>//;
+case: {-2}_ {-2}_ {-2}_ {-2}_ {-2}_ / HS2 (erefl (S n)) (erefl c) (erefl h) (erefl Q') (erefl J)=>//.
+- move=>????? Q1 ?? EH1 ??????? Q2 ? [EV] EH2 ??; rewrite {}EH2 {}EH1 {}EV in Q1 Q2 *.
+  by apply: safe_done.
+- by move=>????? NP ??????????????? EC; rewrite -EC in NP.
+- by move=>???????????????? NP ???? EC; rewrite EC in NP.
+- move=>???????? ST1 [EN1] EC1 _ EQ1 EJ1 ???????? ST2 [EN2] EC2 EH2 EQ2 EJ2.
+  apply: safe_step=>// hf ???? D3 -> HJ R.
+  rewrite {}EC2 in R ST2; rewrite {}EH2 in D3 R ST2; rewrite EJ2 in HJ ST2.
+  case: (ST1 _ _ _ _ _ D3 _ _ R)=>// h1' [hj' ][]; rewrite {1}/hdisj3; case =>?[??][E' ][HJ' ]S1.
+  case: (ST2 _ _ _ _ _ D3 _ _ R)=>// h1''[hj''][]; rewrite {1}/hdisj3; case =>?[??][E''][HJ'']S2.
+  rewrite E' in E''.
+  have EQJ': hj' = hj''.
+  - rewrite EJ1 in HJ' HJ''.
+    apply: (HP _ (hunion h1' hf) _ (hunion h1'' hf))=>//.
+    - by rewrite hdisjoint_union_r; split=>//; rewrite hdisjoint_sym.
+    - by rewrite hdisjoint_union_r; split=>//; rewrite hdisjoint_sym.
+    do 2!(rewrite (hunion_comm hf); last by rewrite hdisjoint_sym).
+    rewrite -!hunion_assoc.
+    rewrite (hunion_comm h1'); last by rewrite hdisjoint_union_r.
+    by rewrite (hunion_comm h1''); last by rewrite hdisjoint_union_r.
+  have EQ1': h1' = h1''.
+  - apply: (hunion_invert_l _ _ (hunion hj' hf))=>//.
+    - by rewrite -EQJ' in E''.
+    - by rewrite hdisjoint_union_r.
+    by rewrite EQJ' hdisjoint_union_r.
+  exists h1', hj'; do!split=>//.
+  - by rewrite EJ2.
+  rewrite {}EN2 {}EN1 {}EJ2 {}EJ1 {}EQ2 {}EQ1 in S1 S2 *; rewrite -{}EQ1' in S2.
+  by apply: IH.
 Qed.
 
 Lemma triple_and: forall J P c Q P' Q',
   precise J ->
   J ⊢ ⦃ P ⦄ c ⦃ Q ⦄ -> J ⊢ ⦃ P' ⦄ c ⦃ Q' ⦄ ->
   J ⊢ ⦃ aand P P' ⦄ c ⦃ fun v => aand (Q v) (Q' v) ⦄.
-Proof.
-  intros until Q'; intros PR TR1 TR2 n h (Ph & P'h).
-  apply safe_and; auto.
-Qed.
+Proof. by move=>??????? H1 H2 ??[??]; apply: safe_and=>//; [apply: H1| apply: H2]. Qed.
 
 (** * 3. Mutual exclusion *)
 
@@ -812,12 +813,12 @@ Qed.
     and 1 if it is busy. *)
 
 Definition sem_invariant (lck: addr) (R: assertion) : assertion :=
-  aexists (fun v => contains lck v ** (if Z.eqb v 0 then emp else R)).
+  aexists (fun v => contains lck v ** (if v == 0 then emp else R)).
 
 (** Acquiring a semaphore (the P operation) is achieved by atomically
     setting it to 0 until its previous value was not 0. *)
 
-Definition SWAP (l: addr) (new_v: Z) : com :=
+Definition SWAP (l: addr) (new_v: int) : com :=
   ATOMIC (LET (GET l) (fun old_v => SEQ (SET l new_v) (PURE old_v))).
 
 Definition ACQUIRE (lck: addr) : com :=
@@ -831,35 +832,31 @@ Definition RELEASE (lck: addr) : com :=
 
 Lemma triple_swap:
   forall lck R,
-  sem_invariant lck R ⊢ ⦃ emp ⦄ SWAP lck 0 ⦃ fun v => if Z.eqb v 0 then emp else R ⦄.
+  sem_invariant lck R ⊢ ⦃ emp ⦄ SWAP lck 0 ⦃ fun v => if v == 0 then emp else R ⦄.
 Proof.
-  intros. apply triple_atomic.
-  rewrite sepconj_emp. unfold sem_invariant at 1.
-  apply triple_exists_pre; intros v.
-  eapply triple_let with
-  (Q := fun v' => ((v' = v) //\\ contains lck v) ** (if v =? 0 then emp else R)).
-  apply triple_frame. apply triple_get.
-  cbn. intros v'. rewrite lift_pureconj. apply triple_simple_conj_pre.
-  intros EQ; subst v'.
-  apply triple_seq with (Q := contains lck 0 ** (if v =? 0 then emp else R)).
-  apply triple_frame.
-  apply triple_consequence_pre with (valid lck).
-  apply triple_set.
-  red; intros. exists v; auto.
-  apply triple_pure.
-  unfold sem_invariant. red; intros. rewrite sepconj_comm, lift_aexists. exists 0.
-  rewrite Z.eqb_refl. rewrite <- (sepconj_comm emp), sepconj_emp. assumption.
+move=>lck R; apply: triple_atomic.
+rewrite sepconj_emp {1}/sem_invariant.
+apply: triple_exists_pre=>v.
+apply: (triple_let _ _ _ _ (fun v' => ((v' = v) //\\ contains lck v) ** (if v == 0 then emp else R))).
+- by apply/triple_frame/triple_get.
+move=>?; rewrite lift_pureconj; apply: triple_simple_conj_pre=>->.
+apply: (triple_seq _ _ _ _ (contains lck 0 ** (if v == 0 then emp else R))).
+- apply/triple_frame/(triple_consequence_pre (valid lck)); first by exact: triple_set.
+  by move=>? ->; exists v.
+apply: triple_pure; rewrite /sem_invariant => ??.
+rewrite sepconj_comm lift_aexists; exists 0.
+by rewrite eq_refl -(sepconj_comm emp) sepconj_emp.
 Qed.
 
 Lemma triple_acquire:
   forall lck R,
   sem_invariant lck R ⊢ ⦃ emp ⦄ ACQUIRE lck ⦃ fun _ => R ⦄.
 Proof.
-  intros.
-  apply triple_consequence_post with (Q' := fun v => (v <> 0) //\\ (if Z.eqb v 0 then emp else R)).
-  apply triple_repeat. apply triple_swap.
-  rewrite Z.eqb_refl. red; auto.
-  intros v h [H1 H2]. apply Z.eqb_neq in H1. rewrite H1 in H2. auto.
+move=>? R.
+apply (triple_consequence_post (fun v => (v != 0) //\\ (if v == 0 then emp else R))).
+- apply: triple_repeat; first by exact: triple_swap.
+  by rewrite eq_refl.
+by move=>??[]; case: eqP.
 Qed.
 
 Lemma triple_release:
@@ -867,20 +864,17 @@ Lemma triple_release:
   precise R ->
   sem_invariant lck R ⊢ ⦃ R ⦄ RELEASE lck ⦃ fun _ => emp ⦄.
 Proof.
-  intros. apply triple_atomic.
-  rewrite sepconj_comm. unfold sem_invariant at 1. rewrite lift_aexists.
-  apply triple_exists_pre. intros v. rewrite sepconj_assoc.
-  apply triple_consequence_post with (Q' := fun _ => contains lck 1 ** (if v =? 0 then emp else R) ** R).
-  apply triple_frame.
-  apply triple_consequence_pre with (valid lck). apply triple_set.
-  red; intros. exists v; auto.
-  intros _. intros h P.
-  assert ((contains lck 1 ** R) h).
-  { eapply sepconj_imp_r; eauto.
-    destruct (v =? 0).
-    rewrite sepconj_emp. red; auto.
-    apply sepconj_self; auto. }
-  rewrite sepconj_emp. exists 1. simpl. auto.
+move=>lck R ?; apply: triple_atomic.
+rewrite sepconj_comm {1}/sem_invariant lift_aexists.
+apply: triple_exists_pre=>v; rewrite sepconj_assoc.
+apply: (triple_consequence_post (fun _ => contains lck 1 ** (if v == 0 then emp else R) ** R)).
+- apply/triple_frame/(triple_consequence_pre (valid lck)); first by exact: triple_set.
+  by move=>? ->; exists v.
+move=>_ ? P.
+rewrite sepconj_emp; exists 1=>/=.
+apply/sepconj_imp_r/P.
+case: eqP=>?; first by rewrite sepconj_emp.
+by apply: sepconj_self.
 Qed.
 
 (** ** 3.2.  Critical regions *)
@@ -897,14 +891,14 @@ Lemma triple_critregion:
   emp ⊢ ⦃ P ** R ⦄ c ⦃ fun v => Q v ** R ⦄ ->
   sem_invariant lck R ⊢ ⦃ P ⦄ CRITREGION lck c ⦃ Q ⦄.
 Proof.
-  intros.
-  apply triple_seq with (Q := R ** P).
-  rewrite <- (sepconj_emp P) at 1. apply triple_frame. apply triple_acquire.
-  eapply triple_let.
-  rewrite sepconj_comm. rewrite <- sepconj_emp at 1. apply triple_frame_invariant. apply H0.
-  intros. simpl. apply triple_seq with (Q := emp ** Q v).
-  rewrite sepconj_comm. apply triple_frame. apply triple_release; auto.
-  rewrite sepconj_emp. apply triple_pure. red; auto.
+move=>? R ? P Q ? H0; apply: (triple_seq _ _ _ _ (R ** P)).
+- by rewrite -{1}(sepconj_emp P); apply/triple_frame/triple_acquire.
+apply: triple_let.
+- rewrite sepconj_comm -[sem_invariant _ _](sepconj_emp).
+  by apply: triple_frame_invariant; exact: H0.
+move=>v /=; apply: (triple_seq _ _ _ _ (emp ** Q v)).
+- by rewrite sepconj_comm; apply/triple_frame/triple_release.
+by rewrite sepconj_emp; apply: triple_pure.
 Qed.
 
 (** ** 3.3. Conditional critical regions *)
