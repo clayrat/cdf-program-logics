@@ -1,9 +1,16 @@
 (** Hoare monads and Dijkstra monads *)
 
+From Coq Require Import ssreflect ssrfun ssrbool.
+From mathcomp Require Import ssrint ssrnum ssralg eqtype.
+From CDF Require Hoare Separation Delay.
+From Paco Require Import paco.
+
+(*
 From Coq Require Import Program ZArith.
 From CDF Require Hoare Separation Delay.
 
 Ltac inv H := inversion H; clear H; subst.
+*)
 
 (** * Hoare monads *)
 
@@ -41,19 +48,19 @@ Definition ret {A: Type} (Q: POST A) (v: A) : M (Q v) A Q :=
 Definition bind {A B: Type}
                 (P: PRE) (Q: POST A) (R: POST B)
                 (a: M P A Q) (f: forall (v: A), M (Q v) B R) : M P B R :=
-  fun p => let '(exist _ b r) := a p in f b r.
+  fun p => let '(exist b r) := a p in f b r.
 
 Definition implies (P P': PRE) := P -> P'.
 
-Definition consequence_pre 
+Definition consequence_pre
      {A: Type} (P P': PRE) (Q: POST A) (IMP: implies P' P) (m: M P A Q) : M P' A Q :=
   fun p' => m (IMP p').
 
-Program Definition consequence_post 
+Program Definition consequence_post
      {A: Type} (P: PRE) (Q Q': POST A) (IMP: forall v, implies (Q v) (Q' v)) (m: M P A Q) : M P A Q' :=
   fun p => m p.
 Next Obligation.
-  destruct (m p); cbn. apply IMP; auto.
+by case: (m p).
 Qed.
 
 End HPure.
@@ -71,7 +78,7 @@ Definition M (P: PRE) (A: Type) (Q: POST A) := P -> { d : delay A | safe Q d }.
 Program Definition ret {A: Type} (Q: POST A) (v: A) : M (Q v) A Q :=
   fun _ => now v.
 Next Obligation.
-  constructor; auto.
+by pfold; apply: safe_now.
 Qed.
 
 Section BIND.
@@ -89,27 +96,29 @@ CoFixpoint bind_aux (d: delay A) : safe Q d -> delay B :=
 Lemma safe_bind_aux:
   forall (d: delay A) (s: safe Q d), safe R (bind_aux d s).
 Proof.
-  cofix COH; intros. unroll_delay (bind_aux d s); destruct d.
-- destruct (f a0 (safe_inv_now Q a0 s)) as (d1 & s1); cbn. constructor; auto.
-- constructor. apply COH. 
-Qed. 
+pcofix CIH=>d s; pfold; rewrite (u_delay (bind_aux d s))=>/=.
+destruct d. (* `case: d` doesn't work *)
+- case: (f a0 (safe_inv_now Q a0 s))=>? S /=; punfold S.
+  by apply: safe_later; left; apply: paco1_mon; first by pfold; exact: S.
+- by apply: safe_later; right; apply: CIH.
+Qed.
 
 Definition bind : M P B R :=
-  fun p => let '(exist _ d s) := a p in exist _ (bind_aux d s) (safe_bind_aux d s).
+  fun p => let '(exist d s) := a p in exist _ (bind_aux d s) (safe_bind_aux d s).
 
 End BIND.
 
 Definition implies (P P': PRE) := P -> P'.
 
-Definition consequence_pre 
+Definition consequence_pre
      {A: Type} (P P': PRE) (Q: POST A) (IMP: implies P' P) (m: M P A Q) : M P' A Q :=
   fun p' => m (IMP p').
 
-Program Definition consequence_post 
+Program Definition consequence_post
      {A: Type} (P: PRE) (Q Q': POST A) (IMP: forall v, implies (Q v) (Q' v)) (m: M P A Q) : M P A Q' :=
   fun p => m p.
 Next Obligation.
-  destruct (m p); cbn. apply safe_consequence with Q; auto.
+by case: (m p)=>? /=; apply: safe_consequence.
 Qed.
 
 (** A specific operation of the DIV monad: a [repeat...until] unbounded loop.
@@ -129,7 +138,7 @@ Context (f: forall (a: A), M (P a) (A + B) R).
 
 CoFixpoint iter_aux (d: delay (A + B)) : safe R d -> delay B :=
   match d with
-  | now (inl a) => fun SAFE => let '(exist _ d' s') := f a (safe_inv_now _ _ SAFE) in later (iter_aux d' s')
+  | now (inl a) => fun SAFE => let '(exist d' s') := f a (safe_inv_now _ _ SAFE) in later (iter_aux d' s')
   | now (inr b) => fun SAFE => now b
   | later d => fun SAFE => later (iter_aux d (safe_inv_later _ _ SAFE))
   end.
@@ -137,20 +146,17 @@ CoFixpoint iter_aux (d: delay (A + B)) : safe R d -> delay B :=
 Lemma safe_iter_aux:
   forall (d: delay (A + B)) (s: safe R d), safe Q (iter_aux d s).
 Proof.
-  cofix COINDHYP; intros. unroll_delay (iter_aux d s); destruct d as [[a | b] | d].
-- destruct f as [ab' s']. constructor. apply COINDHYP.
-- apply safe_inv_now in s. constructor. auto.
-- constructor. apply COINDHYP.
+pcofix CIH=>d s; pfold; rewrite (u_delay (iter_aux d s)) /=.
+destruct d as [[a | b] | d]. (* `case: d` doesn't work *)
+- by case: f=>??; apply: safe_later; right; apply: CIH.
+- by move: (safe_inv_now _ _ s)=>/= ?; apply: safe_now.
+- by apply: safe_later; right; apply: CIH.
 Qed.
 
 Program Definition iter (x: A) : M (P x) B Q :=
   fun p => iter_aux (now (inl x)) _.
-Next Obligation.
-  constructor. auto.
-Qed.
-Next Obligation.
-  apply safe_iter_aux.
-Qed.
+Next Obligation. by pfold; apply: safe_now. Qed.
+Next Obligation. by apply: safe_iter_aux. Qed.
 
 End ITER.
 
@@ -176,56 +182,52 @@ Program Definition bind {A B: Type}
   (a: M P A Q) (f: forall (v: A), M (Q v) B R) : M P B R :=
   fun h p => let '(v, h') := a h p in f v h' _.
 Next Obligation.
-  destruct (a h p) as [[v1 h1] p1]; simpl in *. inv Heq_anonymous. auto.
+case E: (a h p)=>[[??] /= ?]; rewrite {}E /= in Heq_anonymous.
+by case: Heq_anonymous=>->->.
 Qed.
 
 Definition implies (P P': PRE) := P -->> P'.
 
-Definition consequence_pre 
+Definition consequence_pre
      {A: Type} (P P': PRE) (Q: POST A) (IMP: implies P' P) (m: M P A Q) : M P' A Q :=
   fun h p' => m h (IMP h p').
 
-Program Definition consequence_post 
+Program Definition consequence_post
      {A: Type} (P: PRE) (Q Q': POST A) (IMP: forall v, implies (Q v) (Q' v)) (m: M P A Q) : M P A Q' :=
   fun h p => m h p.
 Next Obligation.
-  destruct (m h p) as [[v h'] q]; cbn. apply IMP; auto.
+by case: (m h p)=>[[??] /= ?]; apply: IMP.
 Qed.
 
-Definition consequence 
+Definition consequence
      {A: Type} (P P': PRE) (Q Q': POST A)
                (IMP1: implies P' P) (IMP2: forall v, implies (Q v) (Q' v)) (m: M P A Q) : M P' A Q' :=
   consequence_pre _ _ _ IMP1 (consequence_post _ _ _ IMP2 m).
 
-Program Definition get (l: addr) : 
-  forall v R, M (contains l v ** R) Z (fun v' => (v' = v) //\\ contains l v ** R) :=
+Program Definition get (l: addr) :
+  forall v R, M (contains l v ** R) int (fun v' => (v' == v) //\\ contains l v ** R) :=
   fun v R h p => match h l with Some v' => (v', h) | None => _ end.
 Next Obligation.
-  split; auto.
-  destruct p as (h1 & h2 & p1 & p2 & D & U).
-  rewrite U in Heq_anonymous. cbn in Heq_anonymous.
-  rewrite ! p1, hupdate_same in Heq_anonymous.
-  congruence.
+split=>//.
+case: p=>?[?][p1][?][?]U; rewrite U /= p1 hupdate_same /= in Heq_anonymous.
+by case: Heq_anonymous=>->.
 Qed.
 Next Obligation.
-  exfalso.
-  destruct p as (h1 & h2 & p1 & p2 & D & U).
-  rewrite U in Heq_anonymous. cbn in Heq_anonymous.
-  rewrite ! p1, hupdate_same in Heq_anonymous.
-  congruence.
+exfalso.
+by case: p=>?[?][p1][?][?]U; rewrite U /= p1 hupdate_same /= in Heq_anonymous.
 Qed.
 
-Program Definition set (l: addr) (v: Z) :
+Program Definition set (l: addr) (v: int) :
   forall R, M (valid l ** R) unit (fun _ => contains l v ** R) :=
   fun R h p => (tt, hupdate l v h).
 Next Obligation.
-  destruct p as (h1 & h2 & p1 & p2 & D & U). destruct p1 as (v0 & p1). rewrite p1 in *.
-  exists (hupdate l v hempty), h2.
-  split. red; auto.
-  split. auto.
-  split. red; intros x; cbn. specialize (D x); cbn in D.
-    destruct (Z.eq_dec l x); intuition congruence.
-  rewrite U. apply heap_extensionality; intros x. cbn. destruct (Z.eq_dec l x); auto.
+case: p=>?[h2][[v0 ->]][?][D]U.
+exists (hsing l v), h2; do!split=>//.
+- move=>x /=; move: (D x)=>/=; case: eqP=>?.
+  - by case=>// ?; right.
+  - by move=>_; left.
+rewrite U; apply: heap_extensionality=>? /=.
+by case: eqP.
 Qed.
 
 End HST.
@@ -253,21 +255,17 @@ Definition bind {A B: Type}
 
 Definition implies (P P': PRE) := P -->> P'.
 
-Program Definition consequence_pre 
+Program Definition consequence_pre
      {A: Type} (P P': PRE) (Q: POST A) (IMP: implies P' P) (m: M P A Q) : M P' A Q :=
   fun R => HST.consequence_pre (P ** R) (P' ** R) (fun v => Q v ** R) _ (m R).
-Next Obligation.
-  apply sepconj_imp_l; auto.
-Qed.
+Next Obligation. by apply: sepconj_imp_l. Qed.
 
-Program Definition consequence_post 
+Program Definition consequence_post
      {A: Type} (P: PRE) (Q Q': POST A) (IMP: forall v, implies (Q v) (Q' v)) (m: M P A Q) : M P A Q' :=
   fun R => HST.consequence_post (P ** R) (fun v => Q v ** R) (fun v => Q' v ** R) _ (m R).
-Next Obligation.
-  apply sepconj_imp_l. apply IMP.
-Qed.
+Next Obligation. by apply/sepconj_imp_l/IMP. Qed.
 
-Definition consequence 
+Definition consequence
      {A: Type} (P P': PRE) (Q Q': POST A)
                (IMP1: implies P' P) (IMP2: forall v, implies (Q v) (Q' v)) (m: M P A Q) : M P' A Q' :=
   consequence_pre _ _ _ IMP1 (consequence_post _ _ _ IMP2 m).
@@ -275,21 +273,15 @@ Definition consequence
 Program Definition frame
      {A: Type} (R: PRE) (P: PRE) (Q: POST A) (m: M P A Q) : M (P ** R) A (fun v => Q v ** R) :=
   fun R' => HST.consequence _ _ _ _ _ _ (m (R ** R')).
-Next Obligation.
-  rewrite sepconj_assoc. hnf; auto.
-Qed.
-Next Obligation.
-  rewrite sepconj_assoc. hnf; auto.
-Qed.
+Next Obligation. by rewrite sepconj_assoc. Qed.
+Next Obligation. by rewrite sepconj_assoc. Qed.
 
-Program Definition get (l: addr) : 
-  forall v, M (contains l v) Z (fun v' => (v' = v) //\\ contains l v) :=
+Program Definition get (l: addr) :
+  forall v, M (contains l v) int (fun v' => (v' == v) //\\ contains l v) :=
   fun v R => HST.consequence_post _ _ _ _ (HST.get l v R).
-Next Obligation.
-  rewrite lift_pureconj. hnf; auto.
-Qed.
+Next Obligation. by rewrite lift_pureconj. Qed.
 
-Program Definition set (l: addr) (v: Z) :
+Program Definition set (l: addr) (v: int) :
   M (valid l) unit (fun _ => contains l v) :=
   fun R => HST.set l v R.
 
@@ -334,7 +326,7 @@ Definition BIND {A B: Type} (W1: TRANSF A) (W2: A -> TRANSF B) : TRANSF B :=
 
 Definition bind {A B: Type} (W1: TRANSF A) (W2: A -> TRANSF B)
                 (m: M A W1) (f: forall (v: A), M B (W2 v)) : M B (BIND W1 W2) :=
-  fun Q p => let '(exist _ x q) := m _ p in f x Q q.
+  fun Q p => let '(exist x q) := m _ p in f x Q q.
 
 End DPure.
 
@@ -367,7 +359,7 @@ Definition DIV_of_PURE {A: Type} (W: DPure.TRANSF A) : DDiv.TRANSF A := W.
 
 Definition div_of_pure {A: Type} {W: DPure.TRANSF A} (m: DPure.M A W)
   : DDiv.M A (DIV_of_PURE W)
-  := fun Q p => let '(exist _ v q) := m Q p in (DDiv.ret v Q q).
+  := fun Q p => let '(exist v q) := m Q p in (DDiv.ret v Q q).
 
 (** ** The Dijkstra monad of mutable state *)
 
@@ -392,26 +384,20 @@ Definition bind {A B: Type} (W1: TRANSF A) (W2: A -> TRANSF B)
                 (m: M A W1) (f: forall (v: A), M B (W2 v)) : M B (BIND W1 W2) :=
   fun Q => HST.bind (BIND W1 W2 Q) (fun x => W2 x Q) Q (m (fun x => W2 x Q)) (fun x => f x Q).
 
-Definition GET (l: addr) : TRANSF Z :=
+Definition GET (l: addr) : TRANSF int :=
   fun Q (h: heap) => match h l with Some v => Q v h | None => False end.
 
-Program Definition get (l: addr) : M Z (GET l) :=
+Program Definition get (l: addr) : M int (GET l) :=
   fun Q h p => match h l with Some v => (v, h) | None => _ end.
-Next Obligation.
-  red in p. rewrite <- Heq_anonymous in p. auto.
-Qed.
-Next Obligation.
-  exfalso. red in p. rewrite <- Heq_anonymous in p. auto.
-Qed.
+Next Obligation. by rewrite /GET -Heq_anonymous in p. Qed.
+Next Obligation. by rewrite /GET -Heq_anonymous in p. Qed.
 
-Definition SET (l: addr) (v: Z) : TRANSF unit :=
+Definition SET (l: addr) (v: int) : TRANSF unit :=
   fun Q (h: heap) => h l <> None /\ Q tt (hupdate l v h).
 
-Program Definition set (l: addr) (v: Z) : M unit (SET l v) :=
+Program Definition set (l: addr) (v: int) : M unit (SET l v) :=
   fun Q h p => (tt, hupdate l v h).
-Next Obligation.
-  apply p.
-Qed.
+Next Obligation. by case: p. Qed.
 
 End DST.
 
@@ -423,9 +409,7 @@ Definition ST_of_PURE {A: Type} (W: DPure.TRANSF A) : DST.TRANSF A :=
 Program Definition st_of_pure {A: Type} {W: DPure.TRANSF A} (m: DPure.M A W)
   : DST.M A (ST_of_PURE W)
   := fun Q h p => (m (fun a => Q a h) p, h).
-Next Obligation.
-  destruct m; cbn. auto.
-Qed.
+Next Obligation. by case: m. Qed.
 
 (** ** The Dijkstra monad of exceptions *)
 
@@ -452,11 +436,15 @@ Program Definition bind {A B: Type} (W1: TRANSF A) (W2: A -> TRANSF B)
                    (m: M A W1) (f: forall (v: A), M B (W2 v)) : M B (BIND W1 W2) :=
   fun Q p => match m _ p with inl v => f v Q _ | inr e => inr e end.
 Next Obligation.
-  red in p. destruct m as [r q]. cbn in Heq_anonymous. subst r. auto.
+rewrite /BIND in p Heq_anonymous.
+case E: (m _ p)=>[? P]; rewrite {}E /= in Heq_anonymous.
+by rewrite -Heq_anonymous in P.
 Qed.
 Next Obligation.
-  red in p. destruct m as [r q]. cbn in Heq_anonymous. subst r. auto.
-Qed.  
+rewrite /BIND in p Heq_anonymous.
+case E: (m _ p)=>[? P]; rewrite {}E /= in Heq_anonymous.
+by rewrite -Heq_anonymous in P.
+Qed.
 
 Definition RAISE (A: Type) (e: exn) : TRANSF A := fun Q => Q (inr e).
 
@@ -473,7 +461,4 @@ Definition EXN_of_PURE {A: Type} (W: DPure.TRANSF A) : DExn.TRANSF A :=
 Program Definition exn_of_pure {A: Type} {W: DPure.TRANSF A} (m: DPure.M A W)
   : DExn.M A (EXN_of_PURE W)
   := fun Q p => inl (proj1_sig (m (fun a => Q (inl a)) p)).
-Next Obligation.
-  destruct m; cbn. auto.
-Qed.
-
+Next Obligation. by case: m. Qed.
