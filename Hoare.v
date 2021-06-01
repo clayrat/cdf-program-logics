@@ -34,8 +34,6 @@ Proof. move=> x y; apply: (iffP idP); rewrite /eq_string; by case: (string_dec _
 Canonical Structure string_eqMixin := EqMixin eq_stringP.
 Canonical Structure string_eqType := Eval hnf in EqType _ string_eqMixin.
 
-Ltac inv H := inversion H; clear H; subst.
-
 (** * 1.  The IMP language *)
 
 (** ** 1.1. Arithmetic expressions *)

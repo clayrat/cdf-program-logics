@@ -5,14 +5,6 @@ From mathcomp Require Import ssrnat ssrint ssrnum ssralg seq eqtype order zify.
 From CDF Require Import Sequences Separation.
 Local Open Scope ring_scope.
 
-(*
-From Coq Require Import ZArith Lia Bool String List.
-From Coq Require Import FunctionalExtensionality PropExtensionality.
-From CDF Require Import Sequences Separation.
-
-Local Open Scope Z_scope.
-*)
-
 (** * 1. A language with pointers and concurrency *)
 
 (** Here is a variant of the PTR language (from the course on separation logic)
