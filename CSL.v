@@ -80,7 +80,7 @@ Inductive red: com * heap -> com * heap -> Prop :=
       red (ATOMIC c, h) (PURE v, h')
   | red_alloc: forall sz (h: heap) l,
       (forall i, l <= i < l + sz%:Z -> h i = None) ->
-      l <> 0 ->
+      l != 0 ->
       red (ALLOC sz, h) (PURE l, hinit l sz h)
   | red_get: forall l (h: heap) v,
       h l = Some v ->
@@ -609,7 +609,7 @@ Qed.
 (** *** The "small rules" for heap operations *)
 
 Lemma triple_get: forall J l v,
-  J ⊢ ⦃ contains l v ⦄ GET l ⦃ fun v' => (v' = v) //\\ contains l v ⦄.
+  J ⊢ ⦃ contains l v ⦄ GET l ⦃ fun v' => (v' == v) //\\ contains l v ⦄.
 Proof.
 move=>? l v n h H.
 have L: h l = Some v by apply: contains_eq.
@@ -663,7 +663,7 @@ by apply: heap_extensionality=>? /=; case: eqP.
 Qed.
 
 Lemma triple_alloc: forall J sz,
-  J ⊢ ⦃ emp ⦄  ALLOC sz  ⦃ fun l => (l <> 0) //\\ valid_N l sz ⦄.
+  J ⊢ ⦃ emp ⦄ ALLOC sz ⦃ fun l => (l != 0) //\\ valid_N l sz ⦄.
 Proof.
 move=>? sz n ?->; case: n; first by exact: safe_zero.
 move=>?; apply: safe_step=>//.
@@ -837,9 +837,9 @@ Proof.
 move=>lck R; apply: triple_atomic.
 rewrite sepconj_emp {1}/sem_invariant.
 apply: triple_exists_pre=>v.
-apply: (triple_let _ _ _ _ (fun v' => ((v' = v) //\\ contains lck v) ** (if v == 0 then emp else R))).
+apply: (triple_let _ _ _ _ (fun v' => ((v' == v) //\\ contains lck v) ** (if v == 0 then emp else R))).
 - by apply/triple_frame/triple_get.
-move=>?; rewrite lift_pureconj; apply: triple_simple_conj_pre=>->.
+move=>?; rewrite lift_pureconj; apply: triple_simple_conj_pre=>/eqP ->.
 apply: (triple_seq _ _ _ _ (contains lck 0 ** (if v == 0 then emp else R))).
 - apply/triple_frame/(triple_consequence_pre (valid lck)); first by exact: triple_set.
   by move=>? ->; exists v.
@@ -894,7 +894,7 @@ Proof.
 move=>? R ? P Q ? H0; apply: (triple_seq _ _ _ _ (R ** P)).
 - by rewrite -{1}(sepconj_emp P); apply/triple_frame/triple_acquire.
 apply: triple_let.
-- rewrite sepconj_comm -[sem_invariant _ _](sepconj_emp).
+- rewrite sepconj_comm -[sem_invariant _ _]sepconj_emp.
   by apply: triple_frame_invariant; exact: H0.
 move=>v /=; apply: (triple_seq _ _ _ _ (emp ** Q v)).
 - by rewrite sepconj_comm; apply/triple_frame/triple_release.
@@ -915,36 +915,33 @@ Definition CCR (lck: addr) (b: com) (c: com) :=
 Lemma triple_ccr:
   forall lck R b c B P Q,
   precise R ->
-  emp ⊢ ⦃ P ** R ⦄ b ⦃ fun v => if v =? 0 then P ** R else B ⦄ ->
+  emp ⊢ ⦃ P ** R ⦄ b ⦃ fun v => if v == 0 then P ** R else B ⦄ ->
   emp ⊢ ⦃ B ⦄ c ⦃ fun _ => Q ** R ⦄ ->
   sem_invariant lck R ⊢ ⦃ P ⦄ CCR lck b c ⦃ fun _ => Q ⦄.
 Proof.
-  intros.
-  set (Qloop := fun v => if v =? 0 then P else Q).
-  apply triple_consequence_post with (fun v => (v <> 0) //\\ Qloop v).
-  2: { intros v h (U & V). red in V. apply Z.eqb_neq in U. rewrite U in V. auto. }
-  apply triple_repeat.
-  2: { unfold Qloop. intros v U. simpl in U. auto. }
-  apply triple_seq with (Q := R ** P).
-  { rewrite <- (sepconj_emp P) at 1. apply triple_frame. apply triple_acquire. }
-  rewrite sepconj_comm at 1.
-  eapply triple_let. rewrite <- sepconj_emp at 1. apply triple_frame_invariant. eexact H0.
-  intros v. apply triple_ifthenelse.
+move=>? R ??? P Q ? H1 H2.
+pose Qloop := fun v : int => if v == 0 then P else Q.
+apply: (triple_consequence_post (fun v => (v != 0) //\\ Qloop v));
+  last by move=>?? []; rewrite /Qloop; case: eqP.
+apply: triple_repeat; last by rewrite /Qloop eq_refl.
+apply: (triple_seq _ _ _ _ (R ** P)).
+- by rewrite -{1}(sepconj_emp P); apply/triple_frame/triple_acquire.
+rewrite sepconj_comm; apply: triple_let.
+- by rewrite -[sem_invariant _ _]sepconj_emp; apply/triple_frame_invariant/H1.
+move=>?; apply: triple_ifthenelse.
 - (* B succeeded *)
-  eapply triple_seq.
-  { eapply triple_consequence_pre.
-    rewrite <- sepconj_emp at 1. apply triple_frame_invariant. eexact H1.
-    intros h (X & Y). apply Z.eqb_neq in X. rewrite X in Y. auto. }
-  apply triple_seq with (Q := emp ** Q).
-  { rewrite sepconj_comm at 1. apply triple_frame. apply triple_release; auto. }
-  apply triple_pure. rewrite sepconj_emp. unfold Qloop. cbn. red; auto.
-- (* B failed *)
-  apply triple_consequence_pre with (P ** R).
-  2: { intros h (X & Y). subst v. auto. }
-  eapply triple_seq with (Q := emp ** P).
-  { rewrite sepconj_comm at 1. apply triple_frame. apply triple_release; auto. }
-  apply triple_pure.
-  rewrite sepconj_emp. unfold Qloop. cbn. red; auto.
+  apply: triple_seq.
+  - apply: triple_consequence_pre.
+    - by rewrite -[sem_invariant _ _]sepconj_emp; apply/triple_frame_invariant/H2.
+    by move=>?[]; case: eqP.
+  apply: (triple_seq _ _ _ _ (emp ** Q)).
+  - by rewrite {1}sepconj_comm; apply/triple_frame/triple_release.
+  by apply: triple_pure; rewrite sepconj_emp /Qloop.
+(* B failed *)
+apply: (triple_consequence_pre (P ** R)); last by move=>?[->].
+apply: (triple_seq _ _ _ _ (emp ** P)).
+- by rewrite {1}sepconj_comm; apply/triple_frame/triple_release.
+by apply: triple_pure; rewrite sepconj_emp /Qloop.
 Qed.
 
 (** * 4. The producer/consumer problem *)
@@ -953,7 +950,7 @@ Qed.
 
 Module ProdCons1.
 
-Definition PRODUCE (buff free busy: addr) (data: Z) : com :=
+Definition PRODUCE (buff free busy: addr) (data: int) : com :=
   SEQ (ACQUIRE free)
       (SEQ (SET buff data)
            (RELEASE busy)).
@@ -963,53 +960,51 @@ Definition CONSUME (buff free busy: addr) : com :=
       (LET (GET buff) (fun data =>
            (SEQ (RELEASE free) (PURE data)))).
 
-Definition buffer_invariant (R: Z -> assertion) (buff free busy: addr) :=
+Definition buffer_invariant (R: int -> assertion) (buff free busy: addr) :=
     sem_invariant free (valid buff)
  ** sem_invariant busy (aexists (fun v => contains buff v ** R v)).
 
-Remark precise_buffer_invariant: forall (R: Z -> assertion) buff,
+Remark precise_buffer_invariant: forall (R: int -> assertion) buff,
   (forall v, precise (R v)) ->
   precise (aexists (fun v => contains buff v ** R v)).
 Proof.
-  intros. apply aexists_precise. apply sepconj_param_precise; auto. apply contains_param_precise.
+move=>???; apply: aexists_precise.
+by apply: sepconj_param_precise=>//; apply: contains_param_precise.
 Qed.
 
 Lemma triple_consume: forall R buff free busy,
   buffer_invariant R buff free busy ⊢
            ⦃ emp ⦄ CONSUME buff free busy ⦃ fun v => R v ⦄.
 Proof.
-  intros.
-  eapply triple_seq.
-  unfold buffer_invariant. rewrite sepconj_comm.
-  apply triple_frame_invariant.
-  apply triple_acquire.
-  apply triple_exists_pre. intros v.
-  eapply triple_let.
-  apply triple_frame. apply triple_get.
-  intros v'. cbn. rewrite lift_pureconj. apply triple_simple_conj_pre. intros EQ; subst v'.
-  apply triple_seq with (emp ** R v).
-  unfold buffer_invariant. apply triple_frame_invariant. apply triple_frame.
-  eapply triple_consequence_pre. apply triple_release. apply valid_precise.
-  red; intros; exists v; auto.
-  apply triple_pure. rewrite sepconj_emp. red; auto.
+move=>R ???; apply: triple_seq.
+- rewrite /buffer_invariant sepconj_comm.
+  by apply/triple_frame_invariant/triple_acquire.
+apply: triple_exists_pre=>v; apply: triple_let.
+- by apply/triple_frame/triple_get.
+move=>? /=; rewrite lift_pureconj; apply: triple_simple_conj_pre=>/eqP->.
+apply: (triple_seq _ _ _ _ (emp ** R v)).
+- rewrite /buffer_invariant; apply/triple_frame_invariant/triple_frame.
+  apply: triple_consequence_pre; first by apply/triple_release/valid_precise.
+  by move=>??; exists v.
+by apply: triple_pure; rewrite sepconj_emp.
 Qed.
 
-Lemma triple_produce: forall (R: Z -> assertion) buff free busy data,
+Lemma triple_produce: forall (R: int -> assertion) buff free busy data,
   (forall v, precise (R v)) ->
   buffer_invariant R buff free busy ⊢
            ⦃ R data ⦄ PRODUCE buff free busy data ⦃ fun _ => emp ⦄.
 Proof.
-  intros.
-  apply triple_seq with (valid buff ** R data).
-  unfold buffer_invariant. apply triple_frame_invariant.
-  rewrite <- (sepconj_emp (R data)) at 1.
-  apply triple_frame. apply triple_acquire.
-  apply triple_seq with (contains buff data ** R data).
-  apply triple_frame. apply triple_set.
-  unfold buffer_invariant. rewrite sepconj_comm. apply triple_frame_invariant.
-  eapply triple_consequence_pre.
-  apply triple_release. apply precise_buffer_invariant. assumption.
-  red; intros. exists data; auto.
+move=>R buff ?? data ?.
+apply: (triple_seq _ _ _ _ (valid buff ** R data)).
+- rewrite /buffer_invariant; apply: triple_frame_invariant.
+  rewrite -{1}(sepconj_emp (R data)); apply: triple_frame.
+  by exact: triple_acquire.
+apply: (triple_seq _ _ _ _ (contains buff data ** R data)).
+- by apply/triple_frame/triple_set.
+rewrite /buffer_invariant sepconj_comm; apply: triple_frame_invariant.
+apply: triple_consequence_pre.
+- by apply/triple_release/precise_buffer_invariant.
+by move=>??; exists data.
 Qed.
 
 End ProdCons1.
@@ -1018,7 +1013,7 @@ End ProdCons1.
 
 Module ProdCons2.
 
-Definition PRODUCE (buff: addr) (data: Z) : com :=
+Definition PRODUCE (buff: addr) (data: int) : com :=
   LET (ALLOC 2) (fun a =>
     SEQ (SET a data)
         (ATOMIC (LET (GET buff) (fun prev =>
@@ -1036,109 +1031,100 @@ Definition CONSUME (buff: addr) : com :=
   LET (GET b) (fun data =>
     SEQ (FREE b) (SEQ (FREE (b + 1)) (PURE data)))).
 
-Fixpoint list_invariant (R: Z -> assertion) (l: list Z) (p: addr) : assertion :=
+Fixpoint list_invariant (R: int -> assertion) (l: seq int) (p: addr) : assertion :=
   match l with
-  | nil => (p = 0) //\\ emp
-  | x :: l => (p <> 0) //\\ aexists (fun q => contains p x ** contains (p + 1) q ** R x ** list_invariant R l q)
+  | nil => (p == 0) //\\ emp
+  | x :: l => (p != 0) //\\ aexists (fun q => contains p x ** contains (p + 1) q ** R x ** list_invariant R l q)
   end.
 
-Definition buffer_invariant (R: Z -> assertion) (buff: addr) : assertion :=
+Definition buffer_invariant (R: int -> assertion) (buff: addr) : assertion :=
   aexists (fun l => aexists (fun p => contains buff p ** list_invariant R l p)).
 
 Lemma triple_produce: forall R buff data,
   buffer_invariant R buff ⊢
            ⦃ R data ⦄ PRODUCE buff data ⦃ fun _ => emp ⦄.
 Proof.
-  intros. eapply triple_let.
-  { rewrite <- (sepconj_emp (R data)). apply triple_frame. apply triple_alloc. }
-  intros a; cbn.
-  rewrite lift_pureconj. apply triple_simple_conj_pre; intros NOT0.
-  rewrite ! sepconj_assoc, sepconj_emp.
-  apply triple_seq with (contains a data ** valid (a + 1) ** R data).
-  { apply triple_frame. apply triple_set. }
-  apply triple_atomic.
-  rewrite sepconj_comm. unfold buffer_invariant.
-  rewrite lift_aexists; apply triple_exists_pre; intros l.
-  rewrite lift_aexists; apply triple_exists_pre; intros p.
-  rewrite sepconj_assoc.
-  eapply triple_let.
-  { apply triple_frame. apply triple_get. }
-  intros p'; cbn. rewrite lift_pureconj. apply triple_simple_conj_pre; intros EQ; subst p'.
-  eapply triple_seq.
-  { rewrite (sepconj_pick3 (valid (a + 1))). rewrite sepconj_pick2.
-    apply triple_frame with (Q := fun _ => contains  (a + 1) p).
-    apply triple_set. }
-  rewrite sepconj_pick2. eapply triple_consequence_post.
-  { apply triple_frame. eapply triple_consequence_pre. apply triple_set.
-    intros h A; exists p; auto. }
-  cbn. intros _. rewrite sepconj_emp.
-  rewrite <- (sepconj_swap3 (list_invariant R l p)).
-  rewrite (sepconj_pick2 (contains a data)).
-  intros h A. exists (data :: l), a.
-  revert h A. apply sepconj_imp_r.
-  intros h A. cbn. split; auto. exists p; exact A.
+move=>R ? data; apply: triple_let.
+- by rewrite -(sepconj_emp (R data)); apply/triple_frame/triple_alloc.
+move=>a /=; rewrite lift_pureconj; apply: triple_simple_conj_pre=>?.
+rewrite !sepconj_assoc sepconj_emp.
+apply: (triple_seq _ _ _ _ (contains a data ** valid (a + 1) ** R data)).
+- by apply/triple_frame/triple_set.
+apply: triple_atomic; rewrite sepconj_comm /buffer_invariant.
+rewrite lift_aexists; apply: triple_exists_pre=>l.
+rewrite lift_aexists; apply: triple_exists_pre=>p.
+rewrite sepconj_assoc; apply: triple_let.
+- by apply/triple_frame/triple_get.
+move=>? /=; rewrite lift_pureconj; apply: triple_simple_conj_pre=>/eqP->.
+apply: triple_seq.
+- rewrite (sepconj_pick3 (valid (a + 1))) sepconj_pick2.
+  apply (triple_frame _ _ _ (fun _: int => contains (a + 1) p)). (* `apply:` fails for some reason *)
+  by exact: triple_set.
+rewrite sepconj_pick2; apply: triple_consequence_post.
+- apply/triple_frame/triple_consequence_pre; first by exact: triple_set.
+  by move=>??; exists p.
+move=>? /=; rewrite sepconj_emp.
+rewrite -(sepconj_swap3 (list_invariant R l p)) (sepconj_pick2 (contains a data)).
+move=>h A; exists (data :: l), a.
+move: h A; apply: sepconj_imp_r=>?? /=; split=>//.
+by exists p.
 Qed.
 
 Lemma triple_pop: forall R buff,
   buffer_invariant R buff ⊢
            ⦃ emp ⦄ POP buff ⦃ fun p => aexists (fun x => contains p x ** valid (p + 1) ** R x) ⦄.
 Proof.
-  intros.
-  set (Qloop := fun p => if p =? 0 then emp else aexists (fun x => contains p x ** valid (p + 1) ** R x)).
-  apply triple_consequence_post with (fun p => (p <> 0) //\\ Qloop p).
-  apply triple_repeat.
-- apply triple_atomic.
-  rewrite sepconj_emp.
-  apply triple_exists_pre; intros l.
-  apply triple_exists_pre; intros p.
-  eapply triple_let.
-  { apply triple_frame. apply triple_get. }
-  cbn. intros p'. rewrite lift_pureconj; apply triple_simple_conj_pre; intros E; subst p'.
-  apply triple_ifthenelse.
-  + apply triple_simple_conj_pre; intros NOTZERO.
-    rewrite sepconj_comm. destruct l as [ | x l]; cbn; rewrite lift_pureconj; apply triple_simple_conj_pre; intro; try lia.
-    rewrite lift_aexists; apply triple_exists_pre; intros t.
-    eapply triple_let.
-    { rewrite ! sepconj_assoc, sepconj_pick2. apply triple_frame. apply triple_get. }
-    intros t'; cbn. rewrite lift_pureconj; apply triple_simple_conj_pre; intros E; subst t'.
-    rewrite <- ! sepconj_assoc, sepconj_comm, ! sepconj_assoc.
-    eapply triple_seq.
-    { apply triple_frame with (Q := fun _ => contains buff t).
-      eapply triple_consequence_pre. apply triple_set.
-      intros h A; exists p; auto. }
-     apply triple_pure.
-     unfold Qloop. apply Z.eqb_neq in NOTZERO; rewrite NOTZERO.
-     rewrite (sepconj_pick2 (contains p x)).
-     rewrite <- (sepconj_pick3 (contains buff t)).
-     rewrite <- (sepconj_pick2 (contains buff t)).
-     intros h A. rewrite lift_aexists. exists x. rewrite ! sepconj_assoc.
-     eapply sepconj_imp_r; eauto.
-     intros h' B. apply sepconj_imp_l with (P := contains (p + 1) t).
-     intros h'' C. exists t; auto.
-     revert h' B. apply sepconj_imp_r. apply sepconj_imp_r.
-     intros h''' D. red. exists l; exists t; auto.
-  + apply triple_simple_conj_pre; intros ZERO.
-    apply triple_pure. unfold Qloop; cbn. rewrite sepconj_emp. intros h A; exists l, p; auto.
-- unfold Qloop; cbn. red; auto.
-- unfold Qloop. intros v h [A B]. apply Z.eqb_neq in A. rewrite A in B. auto.
+move=>R buff.
+pose Qloop := fun p => if p == 0 then emp else aexists (fun x => contains p x ** valid (p + 1) ** R x).
+apply: (triple_consequence_post (fun p => (p != 0) //\\ Qloop p));
+  last by rewrite /Qloop=>??[]; case: eqP.
+apply: triple_repeat; last by rewrite /Qloop eq_refl.
+apply: triple_atomic; rewrite sepconj_emp.
+apply: triple_exists_pre=>l.
+apply: triple_exists_pre=>p.
+apply: triple_let.
+- by apply/triple_frame/triple_get.
+move=>? /=; rewrite lift_pureconj; apply: triple_simple_conj_pre=>/eqP->.
+apply: triple_ifthenelse.
+- apply: triple_simple_conj_pre=>NZ; rewrite sepconj_comm.
+  case: l=>[|x l] /=; rewrite lift_pureconj; apply: triple_simple_conj_pre=>H0; first by rewrite H0 in NZ.
+  rewrite lift_aexists; apply: triple_exists_pre=>t.
+  apply: triple_let.
+  - by rewrite !sepconj_assoc sepconj_pick2; apply/triple_frame/triple_get.
+  move=>? /=; rewrite lift_pureconj; apply: triple_simple_conj_pre=>/eqP->.
+  rewrite -!sepconj_assoc sepconj_comm !sepconj_assoc.
+  apply: triple_seq.
+  - apply (triple_frame _ _ _ (fun _: int => contains buff t)). (* `apply:` fails for some reason *)
+    apply: triple_consequence_pre; first by exact: triple_set.
+    by move=>??; exists p.
+  apply: triple_pure; rewrite /Qloop; move/negPf: NZ=>->.
+  rewrite (sepconj_pick2 (contains p x)) -(sepconj_pick3 (contains buff t)) -(sepconj_pick2 (contains buff t)).
+  move=>? H; rewrite lift_aexists; exists x; rewrite !sepconj_assoc.
+  apply/sepconj_imp_r/H=>h' B.
+  apply: (sepconj_imp_l (contains (p + 1) t)); first by move=>??; exists t.
+  move: h' B; apply/sepconj_imp_r/sepconj_imp_r=>??.
+  by exists l, t.
+apply: triple_simple_conj_pre=>_; apply: triple_pure.
+rewrite /Qloop eq_refl sepconj_emp=>??.
+by exists l,p.
 Qed.
 
 Lemma triple_consume: forall R buff,
   buffer_invariant R buff ⊢
            ⦃ emp ⦄ CONSUME buff ⦃ fun data => R data ⦄.
 Proof.
-  intros. eapply triple_let. apply triple_pop.
-  intros b. cbn. apply triple_exists_pre; intros p.
-  eapply triple_let.
-  { apply triple_frame. apply triple_get. }
-  intros p'; cbn; rewrite lift_pureconj; apply triple_simple_conj_pre; intros E; subst p'.
-  eapply triple_seq.
-  { apply triple_frame with (Q := fun _ => emp).
-    eapply triple_consequence_pre. apply triple_free. intros h A; exists p; auto. }
-  rewrite sepconj_emp.
-  eapply triple_seq.
-  { apply triple_frame with (Q := fun _ => emp). apply triple_free. }
-  apply triple_pure. rewrite sepconj_emp. red; auto.
+move=>??; apply: triple_let; first by exact: triple_pop.
+move=>? /=; apply: triple_exists_pre=>p.
+apply: triple_let; first by apply/triple_frame/triple_get.
+move=>? /=; rewrite lift_pureconj; apply: triple_simple_conj_pre=>/eqP->.
+apply: triple_seq.
+- apply (triple_frame _ _ _ (fun _ => emp)). (* `apply:` fails for some reason *)
+  apply: triple_consequence_pre; first by exact: triple_free.
+  by move=>??; exists p.
+rewrite sepconj_emp; apply: triple_seq.
+- apply (triple_frame _ _ _ (fun _ => emp)). (* `apply:` fails for some reason *)
+  by exact: triple_free.
+by apply: triple_pure; rewrite sepconj_emp.
 Qed.
 
 End ProdCons2.
