@@ -45,9 +45,14 @@ Next Obligation.
 case: (isfinite h)=>[i Fi].
 exists (Order.max i (l+1))=>j H.
 case/boolP: (_ == _); first by lia.
+(*- move=>/eqP E; move: H.
+  by rewrite le_maxl=>/andP [_]; rewrite E lez_addr1 ltxx.*)
 by move=>_; apply: Fi; lia.
+(* move: H.
+by rewrite le_maxl=>/andP []. *)
 Qed.
 
+(* put + get *)
 Lemma hupdate_same: forall l v h, (hupdate l v h) l = Some v.
 Proof.
 by move=>??? /=; rewrite eq_refl.
@@ -59,6 +64,16 @@ by move=>???? /=; case: eqP.
 Qed.
 
 Definition hsing (l: addr) (v: int) : heap := hupdate l v hempty.
+
+Program Definition hsing' (l: addr) (v: int) : heap :=
+  {| contents := fun m => if l == m then Some v else None |}.
+Next Obligation.
+exists (l+1)=>j H.
+case/boolP: (_ == _)=>//.
+by lia.
+(* move=>/eqP E.
+by rewrite E lez_addr1 ltxx in H. *)
+Qed.
 
 (** The heap [h] after deallocating address [l]. *)
 
@@ -78,10 +93,9 @@ Fixpoint hinit (l: addr) (sz: nat) (h: heap) : heap :=
 Lemma hinit_inside:
   forall h (sz :nat) l l', l <= l' < l + sz%:Z -> hinit l sz h l' = Some 0.
 Proof.
-move=>?; elim=>/=.
-- by lia.
-- move=>? IH ???; case: ifP=>// ?.
-  by apply: IH; lia.
+move=>?; elim=>/=; first by lia.
+move=>? IH ???; case: ifP=>// ?.
+by apply: IH; lia.
 Qed.
 
 Lemma hinit_outside:
@@ -219,6 +233,7 @@ Definition pure (P: Prop) : assertion :=
 
 (** The assertion "address [l] contains value [v]".
     The domain of the heap must be the singleton [{l}]. *)
+(*  AKA "points-to" *)
 
 Definition contains (l: addr) (v: int) : assertion :=
   fun h => h = hsing l v.
@@ -226,7 +241,7 @@ Definition contains (l: addr) (v: int) : assertion :=
 Lemma contains_eq l v h : contains l v h -> h l = Some v.
 Proof. by move=>-> /=; rewrite eq_refl. Qed.
 
-(** The assertion "address [l] is valid" (i.e. in the domain of the heap). *)
+(** The (derived) assertion "address [l] is valid" (i.e. in the domain of the heap). *)
 
 Definition valid (l: addr) : assertion := aexists (contains l).
 
@@ -235,16 +250,16 @@ Definition valid (l: addr) : assertion := aexists (contains l).
 Definition sepconj (P Q: assertion) : assertion :=
   fun h => exists h1 h2, P h1
                       /\ Q h2
-                      /\ hdisjoint h1 h2  /\ h = hunion h1 h2.
+                      /\ hdisjoint h1 h2 /\ h = hunion h1 h2.
 
 Notation "P ** Q" := (sepconj P Q) (at level 60, right associativity).
 
-(** The conjunction of a simple assertion and a general assertion. *)
+(** The (left) conjunction of a simple assertion and a general assertion. *)
 
 Definition pureconj (P: Prop) (Q: assertion) : assertion :=
   fun h => P /\ Q h.
 
-Notation "P //\\ Q" := (pureconj P Q) (at level 60, right associativity).
+Notation "P /\\ Q" := (pureconj P Q) (at level 60, right associativity).
 
 (** Plain conjunction and disjunction. *)
 
@@ -314,6 +329,10 @@ Qed.
 
 (** ** Other useful logical properties *)
 
+Lemma pureconj_emp: forall P,
+  pure P = P /\\ emp.
+Proof. by []. Qed.
+
 Lemma pure_sep: forall P Q,
   pure (P /\ Q) = pure P ** pure Q.
 Proof.
@@ -325,7 +344,7 @@ rewrite /pure /sepconj; split.
 Qed.
 
 Lemma pureconj_sepconj: forall P Q,
-  pure P ** Q = P //\\ Q.
+  pure P ** Q = P /\\ Q.
 Proof.
 move=>??; apply: assertion_extensionality=>h.
 rewrite /pure /sepconj /pureconj; split.
@@ -334,7 +353,7 @@ rewrite /pure /sepconj /pureconj; split.
 - by move=>[??]; exists hempty, h; do!split=>//; [left | rewrite hunion_empty].
 Qed.
 
-Lemma lift_pureconj: forall P Q R, (P //\\ Q) ** R = P //\\ (Q ** R).
+Lemma lift_pureconj: forall P Q R, (P /\\ Q) ** R = P /\\ (Q ** R).
 Proof.
 by move=>???; rewrite -2!pureconj_sepconj sepconj_assoc.
 Qed.
@@ -373,7 +392,7 @@ Qed.
 (** ** Magic wand *)
 
 Definition wand (P Q: assertion) : assertion :=
-  fun h => forall h', hdisjoint h h' -> P h' -> Q (hunion h h').
+  fun h => forall h2, hdisjoint h h2 -> P h2 -> Q (hunion h h2).
 
 Notation "P --* Q" := (wand P Q) (at level 70, right associativity).
 
@@ -394,7 +413,7 @@ by apply: WH.
 Qed.
 
 Lemma wand_charact: forall P Q,
-  (P --*Q) = (aexists (fun R => (P ** R -->> Q) //\\ R)).
+  (P --*Q) = (aexists (fun R => (P ** R -->> Q) /\\ R)).
 Proof.
 move=>P Q; apply assertion_extensionality=>h; split.
 - move=>?; exists (P --* Q); split=>//.
@@ -474,24 +493,24 @@ Qed.
    (in the words of Gotsman, Berdine, Cook, 2011). *)
 
 Definition precise (P: assertion) : Prop :=
-  forall h1 h2 h1' h2',
-  hdisjoint h1 h2 -> hdisjoint h1' h2' -> hunion h1 h2 = hunion h1' h2' ->
-  P h1 -> P h1' -> h1 = h1'.
+  forall h1 k1 h2 k2,
+  hdisjoint h1 k1 -> hdisjoint h2 k2 -> hunion h1 k1 = hunion h2 k2 ->
+  P h1 -> P h2 -> h1 = h2.
 
 (** A parameterized assertion is precise if, in addition, the parameter
    is uniquely determined as well. *)
 
 Definition param_precise {X: Type} (P: X -> assertion) : Prop :=
-  forall x1 x2 h1 h2 h1' h2',
-  hdisjoint h1 h2 -> hdisjoint h1' h2' -> hunion h1 h2 = hunion h1' h2' ->
-  P x1 h1 -> P x2 h1' -> x1 = x2 /\ h1 = h1'.
+  forall x1 x2 h1 k1 h2 k2,
+  hdisjoint h1 k1 -> hdisjoint h2 k2 -> hunion h1 k1 = hunion h2 k2 ->
+  P x1 h1 -> P x2 h2 -> x1 = x2 /\ h1 = h2.
 
 Remark param_precise_precise:
   forall (X: Type) (P: X -> assertion),
   param_precise P -> forall x, precise (P x).
 Proof.
-move=>?? H x h1 h2 h1' h2' ?????.
-by case: (H x x h1 h2 h1' h2').
+move=>?? H x h1 k1 h2 k2 ?????.
+by case: (H x x h1 k1 h2 k2).
 Qed.
 
 Remark precise_param_precise:
@@ -503,9 +522,7 @@ Qed.
 
 Lemma pure_precise: forall P,
   precise (pure P).
-Proof.
-by move=>????????[?->][?->].
-Qed.
+Proof. by move=>????????[?->][?->]. Qed.
 
 Lemma pure_param_precise: forall (X: Type) (P: X -> Prop),
   (forall x1 x2, P x1 -> P x2 -> x1 = x2) ->
@@ -516,7 +533,7 @@ by apply: H.
 Qed.
 
 Lemma contains_param_precise: forall l,
-  param_precise (fun v => contains l v).
+  param_precise (contains l).
 Proof.
 rewrite /contains=>l ?? h1 h2 h1' h2' H1 H2 HD E1 E2.
 have /= E: hunion h1 h2 l = hunion h1' h2' l by rewrite HD.
@@ -575,6 +592,11 @@ have HP: param_precise (fun _ : unit => P ** Q)
 by move/param_precise_precise: HP; apply.
 Qed.
 
+Lemma true_imprecise: forall P, precise (fun _ => P).
+Proof.
+move=>??????????.
+Abort.
+
 (** Distributivity laws for precise assertions. *)
 
 Lemma sepconj_and_distr_1: forall P1 P2 Q,
@@ -613,6 +635,6 @@ have D: hdisjoint h2 h1 by rewrite hdisjoint_sym.
 have E1: h1 = h2.
 - apply: (H _ h2 _ h1)=>//.
   by rewrite hunion_comm.
-rewrite -E1 in D; move/hdisjoint_empty: D=>->.
+rewrite -E1 in D; move/hdisjoint_empty: D=>->. (* the heap must be empty *)
 by rewrite hunion_empty.
 Qed.

@@ -5,13 +5,6 @@ From mathcomp Require Import ssrint ssrnum ssralg eqtype.
 From CDF Require Hoare Separation Delay.
 From Paco Require Import paco.
 
-(*
-From Coq Require Import Program ZArith.
-From CDF Require Hoare Separation Delay.
-
-Ltac inv H := inversion H; clear H; subst.
-*)
-
 (** * Hoare monads *)
 
 (** ** The generic interface *)
@@ -205,7 +198,7 @@ Definition consequence
   consequence_pre _ _ _ IMP1 (consequence_post _ _ _ IMP2 m).
 
 Program Definition get (l: addr) :
-  forall v R, M (contains l v ** R) int (fun v' => (v' == v) //\\ contains l v ** R) :=
+  forall v R, M (contains l v ** R) int (fun v' => (v' == v) /\\ contains l v ** R) :=
   fun v R h p => match h l with Some v' => (v', h) | None => _ end.
 Next Obligation.
 split=>//.
@@ -277,7 +270,7 @@ Next Obligation. by rewrite sepconj_assoc. Qed.
 Next Obligation. by rewrite sepconj_assoc. Qed.
 
 Program Definition get (l: addr) :
-  forall v, M (contains l v) int (fun v' => (v' == v) //\\ contains l v) :=
+  forall v, M (contains l v) int (fun v' => (v' == v) /\\ contains l v) :=
   fun v R => HST.consequence_post _ _ _ _ (HST.get l v R).
 Next Obligation. by rewrite lift_pureconj. Qed.
 

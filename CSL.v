@@ -491,8 +491,8 @@ by case/boolP: (_ == _).
 Qed.
 
 Lemma triple_ifthenelse: forall J b c1 c2 P Q,
-  J ⊢ ⦃ (b != 0) //\\ P ⦄ c1 ⦃ Q ⦄ ->
-  J ⊢ ⦃ (b == 0) //\\ P ⦄ c2 ⦃ Q ⦄ ->
+  J ⊢ ⦃ (b != 0) /\\ P ⦄ c1 ⦃ Q ⦄ ->
+  J ⊢ ⦃ (b == 0) /\\ P ⦄ c2 ⦃ Q ⦄ ->
   J ⊢ ⦃ P ⦄ IFTHENELSE b c1 c2 ⦃ Q ⦄.
 Proof.
 move=>?????? H1 H2 n ??; case: n; first by exact: safe_zero.
@@ -502,7 +502,7 @@ Qed.
 Lemma triple_repeat: forall J P c Q,
   J ⊢ ⦃ P ⦄ c ⦃ Q ⦄ ->
   Q 0 -->> P ->
-  J ⊢ ⦃ P ⦄ REPEAT c ⦃ fun v => (v != 0) //\\ Q v ⦄.
+  J ⊢ ⦃ P ⦄ REPEAT c ⦃ fun v => (v != 0) /\\ Q v ⦄.
 Proof.
 move=>?? c Q H1 H2; elim=>[|n IH] h ?; first by exact: safe_zero.
 apply: safe_step=>//.
@@ -601,7 +601,7 @@ Qed.
 (** *** The "small rules" for heap operations *)
 
 Lemma triple_get: forall J l v,
-  J ⊢ ⦃ contains l v ⦄ GET l ⦃ fun v' => (v' == v) //\\ contains l v ⦄.
+  J ⊢ ⦃ contains l v ⦄ GET l ⦃ fun v' => (v' == v) /\\ contains l v ⦄.
 Proof.
 move=>? l v n h H.
 have L: h l = Some v by apply: contains_eq.
@@ -655,7 +655,7 @@ by apply: heap_extensionality=>? /=; case: eqP.
 Qed.
 
 Lemma triple_alloc: forall J sz,
-  J ⊢ ⦃ emp ⦄ ALLOC sz ⦃ fun l => (l != 0) //\\ valid_N l sz ⦄.
+  J ⊢ ⦃ emp ⦄ ALLOC sz ⦃ fun l => (l != 0) /\\ valid_N l sz ⦄.
 Proof.
 move=>? sz n ?->; case: n; first by exact: safe_zero.
 move=>?; apply: safe_step=>//.
@@ -741,7 +741,7 @@ Proof. by move=>????? H ??[v ?]; apply: (H v). Qed.
 
 Lemma triple_simple_conj_pre: forall J (P1: Prop) P2 c Q,
   (P1 -> J ⊢ ⦃ P2 ⦄ c ⦃ Q ⦄) ->
-  J ⊢ ⦃ P1 //\\ P2 ⦄ c ⦃ Q ⦄.
+  J ⊢ ⦃ P1 /\\ P2 ⦄ c ⦃ Q ⦄.
 Proof. by move=>????? H ??[??]; apply: H. Qed.
 
 Lemma triple_or: forall J P c Q P' Q',
@@ -829,7 +829,7 @@ Proof.
 move=>lck R; apply: triple_atomic.
 rewrite sepconj_emp {1}/sem_invariant.
 apply: triple_exists_pre=>v.
-apply: (triple_let _ _ _ _ (fun v' => ((v' == v) //\\ contains lck v) ** (if v == 0 then emp else R))).
+apply: (triple_let _ _ _ _ (fun v' => ((v' == v) /\\ contains lck v) ** (if v == 0 then emp else R))).
 - by apply/triple_frame/triple_get.
 move=>?; rewrite lift_pureconj; apply: triple_simple_conj_pre=>/eqP ->.
 apply: (triple_seq _ _ _ _ (contains lck 0 ** (if v == 0 then emp else R))).
@@ -845,7 +845,7 @@ Lemma triple_acquire:
   sem_invariant lck R ⊢ ⦃ emp ⦄ ACQUIRE lck ⦃ fun _ => R ⦄.
 Proof.
 move=>? R.
-apply (triple_consequence_post (fun v => (v != 0) //\\ (if v == 0 then emp else R))).
+apply (triple_consequence_post (fun v => (v != 0) /\\ (if v == 0 then emp else R))).
 - apply: triple_repeat; first by exact: triple_swap.
   by rewrite eq_refl.
 by move=>??[]; case: eqP.
@@ -913,7 +913,7 @@ Lemma triple_ccr:
 Proof.
 move=>? R ??? P Q ? H1 H2.
 pose Qloop := fun v : int => if v == 0 then P else Q.
-apply: (triple_consequence_post (fun v => (v != 0) //\\ Qloop v));
+apply: (triple_consequence_post (fun v => (v != 0) /\\ Qloop v));
   last by move=>?? []; rewrite /Qloop; case: eqP.
 apply: triple_repeat; last by rewrite /Qloop eq_refl.
 apply: (triple_seq _ _ _ _ (R ** P)).
@@ -1025,8 +1025,8 @@ Definition CONSUME (buff: addr) : com :=
 
 Fixpoint list_invariant (R: int -> assertion) (l: seq int) (p: addr) : assertion :=
   match l with
-  | nil => (p == 0) //\\ emp
-  | x :: l => (p != 0) //\\ aexists (fun q => contains p x ** contains (p + 1) q ** R x ** list_invariant R l q)
+  | nil => (p == 0) /\\ emp
+  | x :: l => (p != 0) /\\ aexists (fun q => contains p x ** contains (p + 1) q ** R x ** list_invariant R l q)
   end.
 
 Definition buffer_invariant (R: int -> assertion) (buff: addr) : assertion :=
@@ -1068,7 +1068,7 @@ Lemma triple_pop: forall R buff,
 Proof.
 move=>R buff.
 pose Qloop := fun p => if p == 0 then emp else aexists (fun x => contains p x ** valid (p + 1) ** R x).
-apply: (triple_consequence_post (fun p => (p != 0) //\\ Qloop p));
+apply: (triple_consequence_post (fun p => (p != 0) /\\ Qloop p));
   last by rewrite /Qloop=>??[]; case: eqP.
 apply: triple_repeat; last by rewrite /Qloop eq_refl.
 apply: triple_atomic; rewrite sepconj_emp.

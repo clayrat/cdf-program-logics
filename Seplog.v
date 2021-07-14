@@ -10,8 +10,8 @@ Local Open Scope ring_scope.
 (** * 1. A language of pointers *)
 
 (** We now define a small programming language to work with pointers to
-    mutable state.  The language has variables, but these variables are
-    immutable.  This in unlike IMP but like ML: mutable variables are
+    mutable state. The language has variables, but these variables are
+    immutable. This in unlike IMP but like ML: mutable variables are
     expressed as immutable pointers (references) to mutable state. *)
 
 (** As in ML too, we blur the distinction between expressions and commands.
@@ -19,7 +19,7 @@ Local Open Scope ring_scope.
     in addition to possibly performing effects. *)
 
 (** We use higher-order abstract syntax to represent commands in this
-    language.  With first-order abstract syntax, a "let" binding
+    language. With first-order abstract syntax, a "let" binding
     [let x = a in b] would be represented using the constructor
 <<
     LET: forall (x: ident) (a b: com), com
@@ -247,7 +247,7 @@ Qed.
 (** ** 2.3. The "small rules" for heap operations *)
 
 Lemma triple_get: forall l v,
-  ⦃ contains l v ⦄ GET l ⦃ fun v' => (v' = v) //\\ contains l v ⦄.
+  ⦃ contains l v ⦄ GET l ⦃ fun v' => (v' = v) /\\ contains l v ⦄.
 Proof.
 move=>l v h P.
 have L: h l = Some v by rewrite P hupdate_same.
@@ -291,7 +291,7 @@ Qed.
 Lemma triple_alloc: forall sz,
   ⦃ emp ⦄
   ALLOC sz
-  ⦃ fun l => (l <> 0) //\\ valid_N l sz ⦄.
+  ⦃ fun l => (l <> 0) /\\ valid_N l sz ⦄.
 Proof.
 move=>sz ?->.
 apply: safe_step=>//.
@@ -395,8 +395,8 @@ by move=>??? Q ? H ???; apply/(safe_let Q)/H.
 Qed.
 
 Lemma triple_ifthenelse: forall b c1 c2 P Q,
-  ⦃ (b <> 0) //\\ P ⦄ c1 ⦃ Q ⦄ ->
-  ⦃ (b = 0) //\\ P ⦄ c2 ⦃ Q ⦄ ->
+  ⦃ (b <> 0) /\\ P ⦄ c1 ⦃ Q ⦄ ->
+  ⦃ (b = 0) /\\ P ⦄ c2 ⦃ Q ⦄ ->
   ⦃ P ⦄ IFTHENELSE b c1 c2 ⦃ Q ⦄.
 Proof.
 move=>b c1 c2 ?? H1 H2 h ?; apply: safe_step=>//.
@@ -450,7 +450,7 @@ Qed.
 
 Lemma triple_lift_pure: forall (P: Prop) P' c Q,
   (P -> ⦃ P' ⦄ c ⦃ Q ⦄) ->
-  ⦃ P //\\ P' ⦄ c ⦃ Q ⦄.
+  ⦃ P /\\ P' ⦄ c ⦃ Q ⦄.
 Proof.
 by move=>???? H ?[??]; apply: H.
 Qed.
@@ -501,10 +501,10 @@ Proof. by case. Qed.
 -   [l] is the Coq list of the list elements.
 *)
 
-Fixpoint list_at (a: addr) (l: list int) : assertion :=
+Fixpoint list_at (a: addr) (l: seq int) : assertion :=
   match l with
-  | nil => (a = 0) //\\ emp
-  | h :: t => (a <> 0) //\\ aexists (fun a' => contains a h ** contains (a + 1) a' ** list_at a' t)
+  | nil => pure (a = 0)
+  | h :: t => (a <> 0) /\\ aexists (fun a' => contains a h ** contains (a + 1) a' ** list_at a' t)
   end.
 
 (** ** The "cons" operation *)
@@ -561,7 +561,7 @@ Definition list_length (a: addr) : com := list_length_rec a 0.
 Lemma list_length_rec_correct: forall l a len,
     ⦃ list_at a l ⦄
   list_length_rec a len
-    ⦃ fun len' => (len' = len + (length l)%:Z) //\\ list_at a l ⦄.
+    ⦃ fun len' => (len' = len + (length l)%:Z) /\\ list_at a l ⦄.
 Proof.
 elim=>[|?? IH] a len; rewrite (unroll_com (list_length_rec a len)) /=.
 - apply: triple_lift_pure=>->; apply: triple_ifelse=>//.
@@ -581,7 +581,7 @@ Qed.
 Corollary list_length_correct: forall l a,
     ⦃ list_at a l ⦄
   list_length a
-    ⦃ fun len => (len = (length l)%:Z) //\\ list_at a l ⦄.
+    ⦃ fun len => (len = (length l)%:Z) /\\ list_at a l ⦄.
 Proof.
 by move=>????; apply: list_length_rec_correct.
 Qed.
@@ -739,7 +739,7 @@ Qed.
 (** It also validates the "small rules" for heap operations. *)
 
 Lemma triple_get: forall l v,
-  ⦃ contains l v ⦄ GET l ⦃ fun v' => (v' = v) //\\ contains l v ⦄.
+  ⦃ contains l v ⦄ GET l ⦃ fun v' => (v' = v) /\\ contains l v ⦄.
 Proof.
 move=>l v ? h[h1][h2][H1][?][?]E.
 have L: h l = Some v by rewrite E /=; move/contains_eq: H1=>->.
@@ -791,7 +791,7 @@ Qed.
 Lemma triple_alloc: forall sz,
   ⦃ emp ⦄
   ALLOC sz
-  ⦃ fun l => (l <> 0) //\\ valid_N l sz ⦄.
+  ⦃ fun l => (l <> 0) /\\ valid_N l sz ⦄.
 Proof.
 move=>sz ? h; rewrite sepconj_emp => ?.
 apply: safe_step=>//.
@@ -860,8 +860,8 @@ by apply: (Hoare_let _ _ _ (fun v => Q v ** R')); [apply: H1 | move=>?; apply: H
 Qed.
 
 Lemma Hoare_ifthenelse: forall b c1 c2 P Q,
-  Hoare ((b <> 0) //\\ P) c1 Q ->
-  Hoare ((b = 0) //\\ P) c2 Q ->
+  Hoare ((b <> 0) /\\ P) c1 Q ->
+  Hoare ((b = 0) /\\ P) c2 Q ->
   Hoare P (IFTHENELSE b c1 c2) Q.
 Proof.
 move=>b c1 c2 ?? H1 H2 h ?.
@@ -872,8 +872,8 @@ by case: eqP=>?; [apply: H2|apply: H1].
 Qed.
 
 Lemma triple_ifthenelse: forall b c1 c2 P Q,
-  ⦃ (b <> 0) //\\ P ⦄ c1 ⦃ Q ⦄ ->
-  ⦃ (b = 0) //\\ P ⦄ c2 ⦃ Q ⦄ ->
+  ⦃ (b <> 0) /\\ P ⦄ c1 ⦃ Q ⦄ ->
+  ⦃ (b = 0) /\\ P ⦄ c2 ⦃ Q ⦄ ->
   ⦃ P ⦄ IFTHENELSE b c1 c2 ⦃ Q ⦄.
 Proof.
 by move=>????????; apply: Hoare_ifthenelse; rewrite -lift_pureconj.
@@ -898,7 +898,7 @@ by move=>?; apply: sepconj_imp_l.
 Qed.
 
 Lemma Hoare_pick: forall P n,
-  Hoare P (PICK n) (fun i => (0 <= i < n) //\\ P).
+  Hoare P (PICK n) (fun i => (0 <= i < n) /\\ P).
 Proof.
 move=>? n h ?; apply: safe_step=>//; first by exact: immsafe_pick.
 move=>c' h' R.
@@ -956,7 +956,7 @@ Qed.
     command [c] with postcondition [Q]. *)
 
 Definition wp (c: com) (Q: postcond) : precond :=
-  aexists (fun P => ⦃ P ⦄ c ⦃ Q ⦄ //\\ P).
+  aexists (fun P => ⦃ P ⦄ c ⦃ Q ⦄ /\\ P).
 
 (** What matters about [wp c Q] is that it is a precondition... *)
 
@@ -1052,10 +1052,10 @@ by move=>?[/eqP->].
 Qed.
 
 Lemma wp_alloc: forall sz Q,
-  aforall (fun l => (l <> 0) //\\ valid_N l sz --* Q l) -->> wp (ALLOC sz) Q.
+  aforall (fun l => (l <> 0) /\\ valid_N l sz --* Q l) -->> wp (ALLOC sz) Q.
 Proof.
 move=>sz ???.
-apply: (wp_ramification _ (fun l => (l <> 0) //\\ valid_N l sz)).
+apply: (wp_ramification _ (fun l => (l <> 0) /\\ valid_N l sz)).
 apply: (sepconj_imp_l emp).
 - by apply/wp_weakest/triple_alloc.
 by rewrite sepconj_emp.
@@ -1065,7 +1065,7 @@ Lemma wp_get: forall l v Q,
   contains l v ** (contains l v --* Q v) -->> wp (GET l) Q.
 Proof.
 move=>l v ?? H.
-have W: contains l v -->> wp (GET l) (fun v' => (v' = v) //\\ contains l v)
+have W: contains l v -->> wp (GET l) (fun v' => (v' = v) /\\ contains l v)
   by apply/wp_weakest/triple_get.
 apply/wp_ramification/sepconj_imp_l; first by exact: W.
 apply/sepconj_imp_r/H => ? H2 ???[->?].
