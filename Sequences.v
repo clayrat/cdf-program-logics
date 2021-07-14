@@ -215,7 +215,6 @@ Lemma infseq_coinduction_principle:
   (forall a, X a -> exists b, plus a b /\ X b) ->
   forall a, X a -> infseq a.
 Proof.
-
 move=>X H a0 Xa0.
 exists (fun a => exists b, star a b /\ X b); split.
 - exists a0; split=>//; exact: star_refl.

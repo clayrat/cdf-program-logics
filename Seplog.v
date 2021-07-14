@@ -2,7 +2,7 @@
 
 From Coq Require Import ssreflect ssrfun ssrbool Lia FunctionalExtensionality PropExtensionality.
 From mathcomp Require Import ssrint ssrnum ssralg seq eqtype order zify.
-From CDF Require Import Sequences Separation.
+From CDF Require Import Separation.
 Import Order.Theory.
 Import GRing.Theory.
 Local Open Scope ring_scope.
