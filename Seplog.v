@@ -676,7 +676,7 @@ Definition list_rev (a: addr) : com := list_rev_rec a 0.
 Lemma list_rev_rec_correct: forall l a l' p,
     ⦃ list_at a l ** list_at p l' ⦄
   list_rev_rec a p
-    ⦃ fun x => list_at x (List.rev_append l l') ⦄.
+    ⦃ fun x => list_at x (catrev l l') ⦄.
 Proof.
 elim=>[| ?? IH] a ? p; rewrite (unroll_com (list_rev_rec a p)) /=
   lift_pureconj ?sepconj_emp; apply: triple_lift_pure=>?.
